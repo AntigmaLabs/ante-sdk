@@ -14,7 +14,7 @@ npm install @antigma/ante-sdk
 
 - Node.js 20 or newer.
 - An `ante` executable available on `PATH`, or an explicit `pathToAnteExecutable` option.
-- An Ante runtime that supports `ante serve --stdio` or websocket transport.
+- An Ante runtime that supports `ante serve --stdio` or websocket transport **and speaks the current [Protocol Reference](https://docs.antigma.ai/reference/protocol-reference)** — since `0.2.0` the SDK sends `permission_mode`, not the removed `policy` field. Older `ante` builds that only understand `policy` are not supported.
 
 ## Quick Start
 
@@ -113,6 +113,27 @@ The SDK emits typed `SDKMessage` objects. Common messages include:
 - `result/success`, `result/error`, or `result/cancelled` when a turn completes.
 - `usage` for model usage metadata.
 - `system/diagnostic` for stderr/stdout diagnostics.
+- `extensions` for skills, sub-agents, and MCP servers (with their discovered tools) as the daemon refreshes them — fired once right after session start and again once MCP warm-up completes in the background.
+
+## Model Effort and Live Updates
+
+```ts
+const client = createAnteClient({
+  cwd: process.cwd(),
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
+  permissionMode: "bypassPermissions", // maps to Ante's native "yolo"
+  effort: "high"                       // min | low | medium | high | xhigh | max
+});
+
+await client.connect();
+await client.startSession();
+
+// Switch model/effort/permission mode without restarting the session.
+client.updateSession({ model: "gpt-5.4", effort: "medium", permissionMode: "acceptEdits" });
+```
+
+`Options.permissionMode` keeps its existing six-value vocabulary (`default` / `acceptEdits` / `bypassPermissions` / `plan` / `dontAsk` / `auto`) for backward compatibility with existing callers, but only three of those have a native Ante equivalent: `bypassPermissions` → `yolo`, `acceptEdits`/`auto` → `auto`, everything else → `strict` (always ask).
 
 ## Public API
 
@@ -157,7 +178,7 @@ npm pack --dry-run
 
 ## Versioning
 
-`0.1.x` is the compatibility line used by current Ante integrations. Patch releases keep the public import path stable and may add new message variants or parser support. Breaking API changes should wait for a minor or major version depending on the size of the change.
+Patch releases keep the public import path stable and may add new message variants or parser support. Breaking API changes should wait for a minor or major version depending on the size of the change. `0.2.0` changed the wire-level `permission_mode` field (see `CHANGELOG.md`) — the TypeScript-facing API is unchanged, but it requires an `ante` build that speaks the current Protocol Reference.
 
 ## Release
 

@@ -1,6 +1,11 @@
 export { query } from "./query.js";
 export { createAnteClient, AnteProtocolClient, type AnteClient } from "./session/client.js";
-export { DEFAULT_ANTE_ARGS, resolveOptions, type ResolvedOptions } from "./session/options.js";
+export {
+  DEFAULT_ANTE_ARGS,
+  permissionModeToAnte,
+  resolveOptions,
+  type ResolvedOptions,
+} from "./session/options.js";
 export { createTransport, ensureStdioArgs, ensureWebSocketArgs } from "./transport/factory.js";
 export {
   resolveCommandPath,
@@ -24,6 +29,7 @@ export {
 export {
   buildProcessLaneFromToolPayload,
   extractErrorMessage,
+  extractExtensionRefreshed,
   extractInfoMessage,
   extractModelSpec,
   extractProviderSpec,
@@ -44,12 +50,17 @@ export {
   buildApprovalResponseOperation,
   describeAutoApprovedTools,
 } from "./session/approval.js";
+export { REASONING_EFFORTS, ANTE_THINKING_LEVELS } from "./types.js";
 export type {
+  AntePermissionMode,
   AnteThinkingLevel,
   ApprovalDecision,
   ApprovalRequest,
   ApprovalTool,
   CanUseTool,
+  McpServerInfo,
+  McpToolInfo,
+  McpToolParameter,
   ModelSpec,
   Options,
   PermissionMode,
@@ -57,8 +68,12 @@ export type {
   ProcessStep,
   ProviderSpec,
   Query,
+  ReasoningEffort,
   SDKMessage,
   SDKUserMessage,
+  SessionUpdate,
+  SkillInfo,
+  SubagentInfo,
   ToolCall,
   Usage,
 } from "./types.js";

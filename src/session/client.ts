@@ -1,11 +1,12 @@
 import { buildApprovalResponseOperation } from "./approval.js";
-import { permissionModeToPolicy, resolveOptions, type ResolvedOptions } from "./options.js";
+import { permissionModeToAnte, resolveOptions, type ResolvedOptions } from "./options.js";
 import { createTransport } from "../transport/factory.js";
 import type { AnteTransport } from "../transport/transport.js";
-import type { ApprovalDecision, ApprovalRequest, Options, SDKMessage } from "../types.js";
+import type { ApprovalDecision, ApprovalRequest, Options, SDKMessage, SessionUpdate } from "../types.js";
 import {
   buildProcessLaneFromToolPayload,
   extractErrorMessage,
+  extractExtensionRefreshed,
   extractInfoMessage,
   extractSessionModelSpec,
   extractSessionProviderSpec,
@@ -28,6 +29,7 @@ export interface AnteClient {
   connect(): Promise<void>;
   startSession(): Promise<string>;
   resumeSession(sessionId: string): Promise<string>;
+  updateSession(update: SessionUpdate): void;
   sendUserInput(prompt: string): string;
   respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision): void;
   interrupt(): void;
@@ -106,7 +108,8 @@ export class AnteProtocolClient implements AnteClient {
         provider: this.options.provider,
         streaming: true,
         thinking: this.options.thinking,
-        policy: permissionModeToPolicy(this.options.permissionMode),
+        effort: this.options.effort,
+        permission_mode: permissionModeToAnte(this.options.permissionMode),
         system_prompt: this.options.systemPrompt,
         append_system_prompt: this.options.appendSystemPrompt,
         allowed_tools: allowedTools,
@@ -120,6 +123,24 @@ export class AnteProtocolClient implements AnteClient {
   resumeSession(sessionId: string): Promise<string> {
     this.sendOperation({ ResumeSession: { session_id: sessionId } });
     return this.createPendingSession(sessionId);
+  }
+
+  updateSession(update: SessionUpdate): void {
+    if (update.permissionMode) {
+      this.options.permissionMode = update.permissionMode;
+    }
+    if (update.model) {
+      this.options.model = update.model;
+    }
+    if (update.effort) {
+      this.options.effort = update.effort;
+    }
+    this.sendOperation({
+      UpdateSession: {
+        model: update.model ? { id: update.model, effort: update.effort } : undefined,
+        permission_mode: update.permissionMode ? permissionModeToAnte(update.permissionMode) : undefined,
+      },
+    });
   }
 
   sendUserInput(prompt: string): string {
@@ -305,6 +326,17 @@ export class AnteProtocolClient implements AnteClient {
         }
         return;
       }
+      case "ExtensionRefreshed": {
+        const { skills, subagents, mcpServers } = extractExtensionRefreshed(payload);
+        this.emit({
+          type: "extensions",
+          skills,
+          subagents,
+          mcpServers,
+          session_id: this.sessionId ?? undefined,
+        });
+        return;
+      }
       case "UsageUpdate":
         this.emit({
           type: "usage",
@@ -444,7 +476,11 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   private isLifecycleVariant(name: string): boolean {
-    return name === "SessionStart" || name === "Error" || name === "SessionEnd";
+    // ExtensionRefreshed fires a second time in the background once MCP
+    // warm-up completes (see docs.antigma.ai/reference/protocol-reference),
+    // often after the caller has already started the next turn — it must
+    // not be dropped by the active-turn `parent` filter below.
+    return name === "SessionStart" || name === "Error" || name === "SessionEnd" || name === "ExtensionRefreshed";
   }
 }
 

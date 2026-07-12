@@ -1,9 +1,13 @@
 import type {
   ApprovalRequest,
+  McpServerInfo,
+  McpToolInfo,
   ModelSpec,
   ProcessLane,
   ProcessStep,
   ProviderSpec,
+  SkillInfo,
+  SubagentInfo,
   ToolCall,
   Usage,
 } from "../types.js";
@@ -419,6 +423,114 @@ export const extractToolCall = (
   };
 };
 
+export const extractExtensionRefreshed = (
+  value: unknown,
+): { skills: SkillInfo[]; subagents: SubagentInfo[]; mcpServers: McpServerInfo[] } => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { skills: [], subagents: [], mcpServers: [] };
+  }
+  const record = value as Record<string, unknown>;
+
+  const skills = Array.isArray(record.skills)
+    ? record.skills.reduce<SkillInfo[]>((all, entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return all;
+        }
+        const skill = entry as Record<string, unknown>;
+        const name = typeof skill.name === "string" ? skill.name.trim() : "";
+        if (!name) {
+          return all;
+        }
+        all.push({
+          name,
+          description: typeof skill.description === "string" ? skill.description : undefined,
+          scope: typeof skill.scope === "string" ? skill.scope : undefined,
+          argumentHint: typeof skill.argument_hint === "string" ? skill.argument_hint : undefined,
+        });
+        return all;
+      }, [])
+    : [];
+
+  const subagents = Array.isArray(record.subagents)
+    ? record.subagents.reduce<SubagentInfo[]>((all, entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return all;
+        }
+        const subagent = entry as Record<string, unknown>;
+        const name = typeof subagent.name === "string" ? subagent.name.trim() : "";
+        if (!name) {
+          return all;
+        }
+        all.push({
+          name,
+          description: typeof subagent.description === "string" ? subagent.description : undefined,
+          scope: typeof subagent.scope === "string" ? subagent.scope : undefined,
+        });
+        return all;
+      }, [])
+    : [];
+
+  const mcpServers = Array.isArray(record.mcp_servers)
+    ? record.mcp_servers.reduce<McpServerInfo[]>((all, entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return all;
+        }
+        const server = entry as Record<string, unknown>;
+        const name = typeof server.name === "string" ? server.name.trim() : "";
+        if (!name) {
+          return all;
+        }
+        const tools = Array.isArray(server.tools)
+          ? server.tools.reduce<McpToolInfo[]>((allTools, toolEntry) => {
+              if (!toolEntry || typeof toolEntry !== "object" || Array.isArray(toolEntry)) {
+                return allTools;
+              }
+              const tool = toolEntry as Record<string, unknown>;
+              const toolName = typeof tool.name === "string" ? tool.name.trim() : "";
+              if (!toolName) {
+                return allTools;
+              }
+              const parameters = Array.isArray(tool.parameters)
+                ? tool.parameters.reduce<McpToolInfo["parameters"]>((allParams, paramEntry) => {
+                    if (!paramEntry || typeof paramEntry !== "object" || Array.isArray(paramEntry)) {
+                      return allParams;
+                    }
+                    const param = paramEntry as Record<string, unknown>;
+                    const paramName = typeof param.name === "string" ? param.name.trim() : "";
+                    if (!paramName) {
+                      return allParams;
+                    }
+                    allParams.push({
+                      name: paramName,
+                      paramType: typeof param.param_type === "string" ? param.param_type : undefined,
+                      required: typeof param.required === "boolean" ? param.required : undefined,
+                      description: typeof param.description === "string" ? param.description : undefined,
+                    });
+                    return allParams;
+                  }, [])
+                : [];
+              allTools.push({
+                name: toolName,
+                qualifiedName: typeof tool.qualified_name === "string" ? tool.qualified_name : undefined,
+                description: typeof tool.description === "string" ? tool.description : undefined,
+                parameters,
+              });
+              return allTools;
+            }, [])
+          : [];
+        all.push({
+          name,
+          command: typeof server.command === "string" ? server.command : undefined,
+          args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : undefined,
+          tools,
+        });
+        return all;
+      }, [])
+    : [];
+
+  return { skills, subagents, mcpServers };
+};
+
 export const extractSessionId = (value: unknown): string | null =>
   getStringField(value, ["session_id", "sessionId", "id"]);
 
@@ -430,7 +542,13 @@ export const extractModelSpec = (value: unknown): ModelSpec | null => {
     return null;
   }
   const record = value as Record<string, unknown>;
-  const name = typeof record.name === "string" ? record.name.trim() : "";
+  // Ante's daemon reports models as `{ id, ... }`, not `{ name, ... }` (see
+  // SessionStart.model in the Protocol Reference). Prefer `id`, falling back
+  // to `name` for callers that already normalize their own payloads.
+  const name =
+    (typeof record.id === "string" && record.id.trim()) ||
+    (typeof record.name === "string" && record.name.trim()) ||
+    "";
   if (!name) {
     return null;
   }
@@ -462,7 +580,12 @@ export const extractProviderSpec = (value: unknown): ProviderSpec | null => {
     return null;
   }
   const record = value as Record<string, unknown>;
-  const name = typeof record.name === "string" ? record.name.trim() : "";
+  // Same `id` vs `name` mismatch as extractModelSpec above — the daemon
+  // reports providers as `{ id, display_name, ... }`.
+  const name =
+    (typeof record.id === "string" && record.id.trim()) ||
+    (typeof record.name === "string" && record.name.trim()) ||
+    "";
   if (!name) {
     return null;
   }

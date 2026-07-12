@@ -88,10 +88,14 @@ class AnteQuery implements Query {
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.permissionMode = mode;
+    this.client.updateSession({ permissionMode: mode });
   }
 
   async setModel(model?: string): Promise<void> {
     this.model = model;
+    if (model) {
+      this.client.updateSession({ model });
+    }
   }
 
   async streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void> {

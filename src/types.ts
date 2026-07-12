@@ -1,6 +1,16 @@
 export const ANTE_THINKING_LEVELS = ["Disabled", "Enabled", "Deep", "Max"] as const;
 
+/**
+ * @deprecated Ante's daemon replaced the four-level thinking toggle with a
+ * six-level `effort` scale (see {@link ReasoningEffort}). This type is kept
+ * for backward compatibility with existing `Options.thinking` callers.
+ */
 export type AnteThinkingLevel = (typeof ANTE_THINKING_LEVELS)[number];
+
+export const REASONING_EFFORTS = ["min", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** Ante's unified six-level model effort scale (protocol `SessionConfig.effort`). */
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 export type PermissionMode =
   | "default"
@@ -10,7 +20,10 @@ export type PermissionMode =
   | "dontAsk"
   | "auto";
 
-export type ApprovalDecision = "Accept" | "AcceptForSession" | "Skip" | "Abort";
+/** Ante's native tool-approval policy (protocol `SessionConfig.permission_mode`). */
+export type AntePermissionMode = "strict" | "auto" | "yolo";
+
+export type ApprovalDecision = "Accept" | "AcceptForSession" | "AcceptAlways" | "Skip" | "Abort";
 
 export interface ApprovalTool {
   id: string;
@@ -67,6 +80,40 @@ export interface ProcessLane {
   steps: ProcessStep[];
 }
 
+export interface SkillInfo {
+  name: string;
+  description?: string;
+  scope?: string;
+  argumentHint?: string;
+}
+
+export interface SubagentInfo {
+  name: string;
+  description?: string;
+  scope?: string;
+}
+
+export interface McpToolParameter {
+  name: string;
+  paramType?: string;
+  required?: boolean;
+  description?: string;
+}
+
+export interface McpToolInfo {
+  name: string;
+  qualifiedName?: string;
+  description?: string;
+  parameters: McpToolParameter[];
+}
+
+export interface McpServerInfo {
+  name: string;
+  command?: string;
+  args?: string[];
+  tools: McpToolInfo[];
+}
+
 export type SDKUserMessage = {
   type: "user";
   message: string;
@@ -112,6 +159,13 @@ export type SDKMessage =
       result?: string;
       error?: string;
       session_id?: string;
+    }
+  | {
+      type: "extensions";
+      skills: SkillInfo[];
+      subagents: SubagentInfo[];
+      mcpServers: McpServerInfo[];
+      session_id?: string;
     };
 
 export type CanUseTool = (
@@ -131,6 +185,7 @@ export interface Options {
   continue?: boolean;
   cwd?: string;
   disallowedTools?: string[];
+  effort?: ReasoningEffort;
   env?: Record<string, string | undefined>;
   model?: string;
   pathToAnteExecutable?: string;
@@ -140,9 +195,16 @@ export interface Options {
   stderr?: (data: string) => void;
   systemPrompt?: string | { type: "preset"; preset: "ante"; append?: string };
   appendSystemPrompt?: string;
+  /** @deprecated Use `effort` instead; Ante's daemon now unifies thinking control into a six-level effort scale. */
   thinking?: AnteThinkingLevel | { type: "disabled" | "enabled" | "deep" | "max" } | null;
   transport?: "stdio" | "websocket";
   wsAddress?: string;
+}
+
+export interface SessionUpdate {
+  model?: string;
+  effort?: ReasoningEffort;
+  permissionMode?: PermissionMode;
 }
 
 export interface Query extends AsyncGenerator<SDKMessage, void> {

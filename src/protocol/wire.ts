@@ -1,4 +1,4 @@
-import type { AnteThinkingLevel, ApprovalDecision } from "../types.js";
+import type { AntePermissionMode, AnteThinkingLevel, ApprovalDecision, ReasoningEffort } from "../types.js";
 
 export interface AnteEventEnvelope {
   event?: unknown;
@@ -12,7 +12,8 @@ export type AnteOperation =
         provider: string;
         streaming: boolean;
         thinking: AnteThinkingLevel | null;
-        policy?: "Auto" | "Ask" | "Deny";
+        effort?: ReasoningEffort;
+        permission_mode?: AntePermissionMode;
         system_prompt?: string;
         append_system_prompt?: string;
         allowed_tools?: string[];
@@ -27,10 +28,11 @@ export type AnteOperation =
     }
   | {
       UpdateSession: {
-        model: {
-          name: string;
+        model?: {
+          id: string;
+          effort?: ReasoningEffort;
         };
-        provider: string;
+        permission_mode?: AntePermissionMode;
       };
     }
   | {

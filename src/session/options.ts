@@ -1,4 +1,4 @@
-import type { AnteThinkingLevel, Options, PermissionMode } from "../types.js";
+import type { AntePermissionMode, AnteThinkingLevel, Options, PermissionMode, ReasoningEffort } from "../types.js";
 
 export const DEFAULT_ANTE_ARGS = ["serve", "--stdio"] as const;
 
@@ -8,6 +8,7 @@ export interface ResolvedOptions {
   anteArgs: string[];
   cwd: string;
   disallowedTools: string[];
+  effort?: ReasoningEffort;
   env: Record<string, string>;
   model: string;
   pathToAnteExecutable: string;
@@ -59,6 +60,7 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   anteArgs: options.anteArgs ?? [...DEFAULT_ANTE_ARGS],
   cwd: options.cwd ?? process.cwd(),
   disallowedTools: options.disallowedTools ?? [],
+  effort: options.effort,
   env: normalizeEnv(options.env),
   model: options.model ?? "",
   pathToAnteExecutable: options.pathToAnteExecutable ?? "ante",
@@ -77,15 +79,31 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   wsAddress: options.wsAddress ?? "127.0.0.1:17361",
 });
 
-export const permissionModeToPolicy = (mode: PermissionMode): "Auto" | "Ask" | "Deny" => {
+/**
+ * Maps the SDK's six-value `PermissionMode` (inherited from Claude Code-style
+ * consumers) onto Ante's native three-state `permission_mode`
+ * (`strict`/`auto`/`yolo` — see `ante --help`'s `--yolo` flag and the
+ * Protocol Reference at https://docs.antigma.ai/reference/protocol-reference).
+ *
+ * `bypassPermissions` and `acceptEdits` used to collapse onto the same
+ * deprecated `policy: "Auto"` value, so a caller asking for a full bypass got
+ * the same behavior as "auto-accept edits". They are now split: only
+ * `bypassPermissions` maps to Ante's `yolo` (skip all approvals), matching
+ * the CLI's own `--yolo` semantics.
+ *
+ * `plan` and `dontAsk` have no native Ante equivalent (Ante has no
+ * "plan-only" mode and no persistent "deny everything" policy). They resolve
+ * to `strict` — the conservative choice that always asks rather than
+ * silently granting or silently rejecting tool calls.
+ */
+export const permissionModeToAnte = (mode: PermissionMode): AntePermissionMode => {
   switch (mode) {
     case "bypassPermissions":
+      return "yolo";
     case "acceptEdits":
-      return "Auto";
-    case "dontAsk":
-    case "plan":
-      return "Deny";
+    case "auto":
+      return "auto";
     default:
-      return "Ask";
+      return "strict";
   }
 };

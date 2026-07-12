@@ -115,3 +115,126 @@ test("ignores tool update protocol events", async () => {
 
   assert.deepEqual(messages, []);
 });
+
+test("startSession sends Ante's native permission_mode instead of the deprecated policy field", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider", permissionMode: "bypassPermissions" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(payload.permission_mode, "yolo");
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "policy"), false);
+});
+
+test("startSession maps acceptEdits to auto and default to strict", () => {
+  const acceptEditsTransport = new FakeTransport();
+  new AnteProtocolClient(
+    { model: "model", provider: "provider", permissionMode: "acceptEdits" },
+    (_options: ResolvedOptions) => acceptEditsTransport,
+  )
+    .startSession()
+    .catch(() => {});
+  assert.equal(startSessionPayload(acceptEditsTransport).permission_mode, "auto");
+
+  const defaultTransport = new FakeTransport();
+  new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => defaultTransport,
+  )
+    .startSession()
+    .catch(() => {});
+  assert.equal(startSessionPayload(defaultTransport).permission_mode, "strict");
+});
+
+test("startSession forwards effort when provided", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider", effort: "high" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(payload.effort, "high");
+});
+
+test("updateSession sends model id and mapped permission_mode", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.updateSession({ model: "gpt-5.4", effort: "low", permissionMode: "bypassPermissions" });
+  const envelope = JSON.parse(transport.sent[0] ?? "{}") as {
+    op?: { UpdateSession?: Record<string, unknown> };
+  };
+
+  assert.deepEqual(envelope.op?.UpdateSession, {
+    model: { id: "gpt-5.4", effort: "low" },
+    permission_mode: "yolo",
+  });
+});
+
+test("emits an extensions message for ExtensionRefreshed events", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: unknown[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  transport.emit({
+    ExtensionRefreshed: {
+      session_id: "ses_test",
+      skills: [{ name: "commit", description: "Create a git commit", scope: "user" }],
+      subagents: [],
+      mcp_servers: [],
+    },
+  });
+
+  assert.deepEqual(messages, [
+    {
+      type: "extensions",
+      skills: [{ name: "commit", description: "Create a git commit", scope: "user", argumentHint: undefined }],
+      subagents: [],
+      mcpServers: [],
+      session_id: undefined,
+    },
+  ]);
+});
+
+test("does not drop a late ExtensionRefreshed (MCP warm-up) during an active turn", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: unknown[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  // Simulate an in-flight turn (activeInputOpId is set) before the
+  // background MCP warm-up event arrives with an unrelated/absent parent.
+  client.sendUserInput("hello");
+  transport.emit({
+    ExtensionRefreshed: {
+      skills: [],
+      subagents: [],
+      mcp_servers: [{ name: "filesystem", tools: [] }],
+    },
+  });
+
+  const extensionMessages = messages.filter(
+    (message): message is { type: "extensions" } =>
+      typeof message === "object" && message !== null && (message as { type?: string }).type === "extensions",
+  );
+  assert.equal(extensionMessages.length, 1);
+});

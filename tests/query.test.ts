@@ -8,6 +8,7 @@ import type {
   Options,
   SDKMessage,
   SDKUserMessage,
+  SessionUpdate,
 } from "../src/types.js";
 
 class FakeClient implements AnteClient {
@@ -15,6 +16,7 @@ class FakeClient implements AnteClient {
   sentInputs: string[] = [];
   startCalls = 0;
   resumeCalls: string[] = [];
+  updateCalls: SessionUpdate[] = [];
   private onMessage: (message: SDKMessage) => void = () => {};
   private onDone: (result: {
     status: "completed" | "failed" | "cancelled";
@@ -36,6 +38,10 @@ class FakeClient implements AnteClient {
     return new Promise((resolve) => {
       this.sessionResolve = resolve;
     });
+  }
+
+  updateSession(update: SessionUpdate): void {
+    this.updateCalls.push(update);
   }
 
   sendUserInput(prompt: string): string {
@@ -113,6 +119,27 @@ test("query waits for session readiness before sending initial prompt", async ()
   assert.deepEqual(client.sentInputs, ["hello"]);
   client.complete();
   assert.deepEqual(await query.next(), { value: undefined, done: true });
+});
+
+test("setPermissionMode and setModel forward to the client's updateSession", async () => {
+  const client = new FakeClient();
+  const query = new __test__.AnteQuery(
+    "hello",
+    { model: "model", provider: "provider" },
+    (_options: Options) => client,
+  );
+
+  await Promise.resolve();
+  client.resolveSession("ses_1");
+  await query.next();
+
+  await query.setPermissionMode("bypassPermissions");
+  await query.setModel("gpt-5.4");
+
+  assert.deepEqual(client.updateCalls, [
+    { permissionMode: "bypassPermissions" },
+    { model: "gpt-5.4" },
+  ]);
 });
 
 test("query waits for resumed session before streaming input", async () => {
