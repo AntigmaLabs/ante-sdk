@@ -4,6 +4,7 @@ export {
   DEFAULT_ANTE_ARGS,
   permissionModeToAnte,
   resolveOptions,
+  thinkingToEffort,
   type ResolvedOptions,
 } from "./session/options.js";
 export { createTransport, ensureStdioArgs, ensureWebSocketArgs } from "./transport/factory.js";

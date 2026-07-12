@@ -106,15 +106,14 @@ export class AnteProtocolClient implements AnteClient {
       StartSession: {
         model: this.options.model,
         provider: this.options.provider,
-        streaming: true,
-        thinking: this.options.thinking,
         effort: this.options.effort,
         permission_mode: permissionModeToAnte(this.options.permissionMode),
         system_prompt: this.options.systemPrompt,
         append_system_prompt: this.options.appendSystemPrompt,
-        allowed_tools: allowedTools,
-        disallowed_tools: disallowedTools,
+        include_tools: allowedTools,
+        exclude_tools: disallowedTools,
         cwd: this.options.cwd,
+        enable_auto_memory: this.options.enableAutoMemory,
       },
     });
     return this.createPendingSession();

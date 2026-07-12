@@ -9,6 +9,7 @@ export interface ResolvedOptions {
   cwd: string;
   disallowedTools: string[];
   effort?: ReasoningEffort;
+  enableAutoMemory?: boolean;
   env: Record<string, string>;
   model: string;
   pathToAnteExecutable: string;
@@ -44,6 +45,28 @@ const normalizeThinking = (thinking: Options["thinking"]): AnteThinkingLevel | n
   }
 };
 
+/**
+ * Maps the removed four-level `thinking` toggle onto the daemon's six-level
+ * effort scale, so callers still passing `thinking` keep an equivalent
+ * behavior. The daemon itself no longer parses a `thinking` field (verified
+ * against ante 0.preview.56: unknown values pass without a deserialize
+ * error, i.e. the field is gone, not lenient).
+ */
+export const thinkingToEffort = (thinking: AnteThinkingLevel | null): ReasoningEffort | undefined => {
+  switch (thinking) {
+    case "Disabled":
+      return "min";
+    case "Enabled":
+      return "medium";
+    case "Deep":
+      return "high";
+    case "Max":
+      return "max";
+    default:
+      return undefined;
+  }
+};
+
 const normalizeEnv = (env: Options["env"]): Record<string, string> => {
   const normalized: Record<string, string> = {};
   for (const [key, value] of Object.entries(env ?? {})) {
@@ -60,7 +83,8 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   anteArgs: options.anteArgs ?? [...DEFAULT_ANTE_ARGS],
   cwd: options.cwd ?? process.cwd(),
   disallowedTools: options.disallowedTools ?? [],
-  effort: options.effort,
+  effort: options.effort ?? thinkingToEffort(normalizeThinking(options.thinking)),
+  enableAutoMemory: options.enableAutoMemory,
   env: normalizeEnv(options.env),
   model: options.model ?? "",
   pathToAnteExecutable: options.pathToAnteExecutable ?? "ante",

@@ -52,11 +52,11 @@ test("startSession omits empty tool filters", () => {
   client.startSession().catch(() => {});
   const payload = startSessionPayload(transport);
 
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, "allowed_tools"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, "disallowed_tools"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "include_tools"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "exclude_tools"), false);
 });
 
-test("startSession preserves explicit tool filters", () => {
+test("startSession sends tool filters under the daemon's include/exclude field names", () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
     {
@@ -71,8 +71,47 @@ test("startSession preserves explicit tool filters", () => {
   client.startSession().catch(() => {});
   const payload = startSessionPayload(transport);
 
-  assert.deepEqual(payload.allowed_tools, ["WebFetch"]);
-  assert.deepEqual(payload.disallowed_tools, ["Write"]);
+  assert.deepEqual(payload.include_tools, ["WebFetch"]);
+  assert.deepEqual(payload.exclude_tools, ["Write"]);
+  // The daemon never parsed these names; they must not be sent.
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "allowed_tools"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "disallowed_tools"), false);
+});
+
+test("startSession no longer sends the removed streaming/thinking/policy fields", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider", thinking: "Deep" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "streaming"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "thinking"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "policy"), false);
+});
+
+test("legacy thinking maps onto effort when effort is not set", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider", thinking: "Deep" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  assert.equal(startSessionPayload(transport).effort, "high");
+
+  const explicitTransport = new FakeTransport();
+  new AnteProtocolClient(
+    { model: "model", provider: "provider", thinking: "Deep", effort: "low" },
+    (_options: ResolvedOptions) => explicitTransport,
+  )
+    .startSession()
+    .catch(() => {});
+  // An explicit effort wins over the deprecated thinking mapping.
+  assert.equal(startSessionPayload(explicitTransport).effort, "low");
 });
 
 test("emits turn start messages for the active input operation", async () => {

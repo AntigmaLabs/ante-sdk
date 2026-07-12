@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+Completes the protocol alignment started in 0.2.0. All fixes verified against a live `ante serve --stdio` (0.preview.56) and the `SessionOverrides` struct in ante-preview's `protocol-shape` crate — the daemon ignores unknown fields, so every one of these was failing silently rather than erroring.
+
+- **Fix tool filters being silently ignored:** `StartSession` now sends `include_tools` / `exclude_tools` (the daemon's actual field names) instead of `allowed_tools` / `disallowed_tools`, which the daemon never parsed. `Options.allowedTools` / `Options.disallowedTools` keep their names; only the wire encoding changed.
+- **Stop sending removed fields:** `streaming` and `thinking` are no longer part of the daemon's `SessionOverrides` and are dropped from the wire. The deprecated `Options.thinking` now maps onto `effort` (`Disabled`→`min`, `Enabled`→`medium`, `Deep`→`high`, `Max`→`max`; exported as `thinkingToEffort`) so existing callers keep equivalent behavior. An explicit `Options.effort` wins over the mapping.
+- Add `Options.enableAutoMemory` → `enable_auto_memory`, completing the documented `SessionConfig` field set.
+
 ## 0.2.0
 
 Brings the SDK back in sync with the current Ante Protocol (verified live against `ante` 0.preview.56 / `ante serve --stdio`; see https://docs.antigma.ai/reference/protocol-reference).

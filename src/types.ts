@@ -186,6 +186,7 @@ export interface Options {
   cwd?: string;
   disallowedTools?: string[];
   effort?: ReasoningEffort;
+  enableAutoMemory?: boolean;
   env?: Record<string, string | undefined>;
   model?: string;
   pathToAnteExecutable?: string;

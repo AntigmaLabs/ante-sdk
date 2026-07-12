@@ -1,24 +1,27 @@
-import type { AntePermissionMode, AnteThinkingLevel, ApprovalDecision, ReasoningEffort } from "../types.js";
+import type { AntePermissionMode, ApprovalDecision, ReasoningEffort } from "../types.js";
 
 export interface AnteEventEnvelope {
   event?: unknown;
   parent?: string;
 }
 
+// Field names follow the daemon's `SessionOverrides` struct exactly
+// (crates/protocol-shape in ante-preview; docs.antigma.ai/reference/protocol-reference).
+// The daemon ignores unknown fields rather than rejecting them, so a wrong
+// name here fails silently — verify against a live daemon when changing.
 export type AnteOperation =
   | {
       StartSession: {
         model: string;
         provider: string;
-        streaming: boolean;
-        thinking: AnteThinkingLevel | null;
         effort?: ReasoningEffort;
         permission_mode?: AntePermissionMode;
         system_prompt?: string;
         append_system_prompt?: string;
-        allowed_tools?: string[];
-        disallowed_tools?: string[];
+        include_tools?: string[];
+        exclude_tools?: string[];
         cwd?: string;
+        enable_auto_memory?: boolean;
       };
     }
   | {
