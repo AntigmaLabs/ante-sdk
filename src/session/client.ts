@@ -1,5 +1,10 @@
 import { buildApprovalResponseOperation } from "./approval.js";
-import { permissionModeToAnte, resolveOptions, type ResolvedOptions } from "./options.js";
+import {
+  buildStartSessionPayload,
+  permissionModeToAnte,
+  resolveOptions,
+  type ResolvedOptions,
+} from "./options.js";
 import { createTransport } from "../transport/factory.js";
 import type { AnteTransport } from "../transport/transport.js";
 import type { ApprovalDecision, ApprovalRequest, Options, SDKMessage, SessionUpdate } from "../types.js";
@@ -100,21 +105,8 @@ export class AnteProtocolClient implements AnteClient {
     if (!this.options.model.trim() || !this.options.provider.trim()) {
       throw new Error("Ante model and provider are required");
     }
-    const allowedTools = this.options.allowedTools.length > 0 ? this.options.allowedTools : undefined;
-    const disallowedTools = this.options.disallowedTools.length > 0 ? this.options.disallowedTools : undefined;
     this.sendOperation({
-      StartSession: {
-        model: this.options.model,
-        provider: this.options.provider,
-        effort: this.options.effort,
-        permission_mode: permissionModeToAnte(this.options.permissionMode),
-        system_prompt: this.options.systemPrompt,
-        append_system_prompt: this.options.appendSystemPrompt,
-        include_tools: allowedTools,
-        exclude_tools: disallowedTools,
-        cwd: this.options.cwd,
-        enable_auto_memory: this.options.enableAutoMemory,
-      },
+      StartSession: buildStartSessionPayload(this.options),
     });
     return this.createPendingSession();
   }

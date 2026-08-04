@@ -123,7 +123,13 @@ const client = createAnteClient({
   provider: "anthropic",
   model: "claude-sonnet-4-6",
   permissionMode: "bypassPermissions", // maps to Ante's native "yolo"
-  effort: "high"                       // min | low | medium | high | xhigh | max
+  effort: "high",                      // min | low | medium | high | xhigh | max
+  // Lean sessions (selection actions, one-shots):
+  shortPrompt: true,                   // compact system prompt + smaller tool descriptions
+  noSkills: true,                      // skip skill discovery for this session
+  enableAutoMemory: false,
+  // Forward a brand-new daemon SessionOverrides field before the SDK types it:
+  // sessionExtras: { some_new_flag: true },
 });
 
 await client.connect();

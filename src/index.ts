@@ -2,9 +2,12 @@ export { query } from "./query.js";
 export { createAnteClient, AnteProtocolClient, type AnteClient } from "./session/client.js";
 export {
   DEFAULT_ANTE_ARGS,
+  RESERVED_START_SESSION_KEYS,
+  buildStartSessionPayload,
   permissionModeToAnte,
   resolveOptions,
   thinkingToEffort,
+  type ReservedStartSessionKey,
   type ResolvedOptions,
 } from "./session/options.js";
 export { createTransport, ensureStdioArgs, ensureWebSocketArgs } from "./transport/factory.js";
@@ -26,6 +29,7 @@ export {
   serializeOperation,
   type AnteEventEnvelope,
   type AnteOperation,
+  type StartSessionPayload,
 } from "./protocol/wire.js";
 export {
   buildProcessLaneFromToolPayload,
@@ -72,6 +76,7 @@ export type {
   ReasoningEffort,
   SDKMessage,
   SDKUserMessage,
+  SessionExtras,
   SessionUpdate,
   SkillInfo,
   SubagentInfo,

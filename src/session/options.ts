@@ -1,21 +1,71 @@
-import type { AntePermissionMode, AnteThinkingLevel, Options, PermissionMode, ReasoningEffort } from "../types.js";
+import type {
+  AntePermissionMode,
+  AnteThinkingLevel,
+  Options,
+  PermissionMode,
+  ReasoningEffort,
+  SessionExtras,
+} from "../types.js";
+import type { StartSessionPayload } from "../protocol/wire.js";
 
 export const DEFAULT_ANTE_ARGS = ["serve", "--stdio"] as const;
 
+/**
+ * Wire keys that first-class `Options` fields own. `sessionExtras` entries
+ * with these names are dropped so callers cannot bypass SDK mappings
+ * (`permission_mode`, tool filter names, effort, …).
+ */
+export const RESERVED_START_SESSION_KEYS = [
+  "model",
+  "provider",
+  "effort",
+  "permission_mode",
+  "system_prompt",
+  "append_system_prompt",
+  "include_tools",
+  "exclude_tools",
+  "cwd",
+  "enable_auto_memory",
+  "short_prompt",
+  "no_skills",
+  // Legacy / wrong names the SDK used to send — keep them reserved so an
+  // extras bag cannot reintroduce them under the old labels.
+  "allowed_tools",
+  "disallowed_tools",
+  "policy",
+  "streaming",
+  "thinking",
+] as const;
+
+export type ReservedStartSessionKey = (typeof RESERVED_START_SESSION_KEYS)[number];
+
 export interface ResolvedOptions {
   abortController: AbortController;
-  allowedTools: string[];
+  /**
+   * `undefined` = leave the daemon's default toolset alone (field omitted).
+   * `[]` = send `include_tools: []` (explicit empty whitelist — no tools).
+   * Non-empty = whitelist those tools.
+   */
+  allowedTools?: string[];
   anteArgs: string[];
   cwd: string;
-  disallowedTools: string[];
+  /**
+   * `undefined` / omitted = no exclude list.
+   * Non-empty = send `exclude_tools`.
+   * An explicit empty array is treated like omit (excluding nothing).
+   */
+  disallowedTools?: string[];
   effort?: ReasoningEffort;
   enableAutoMemory?: boolean;
   env: Record<string, string>;
   model: string;
+  noSkills?: boolean;
   pathToAnteExecutable: string;
   permissionMode: PermissionMode;
   provider: string;
   resume?: string;
+  sessionExtras: SessionExtras;
+  shortPrompt?: boolean;
   stderr?: (data: string) => void;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -77,20 +127,41 @@ const normalizeEnv = (env: Options["env"]): Record<string, string> => {
   return normalized;
 };
 
+const normalizeSessionExtras = (extras: Options["sessionExtras"]): SessionExtras => {
+  if (!extras) {
+    return {};
+  }
+  const normalized: SessionExtras = {};
+  for (const [key, value] of Object.entries(extras)) {
+    if (value === undefined) {
+      continue;
+    }
+    if ((RESERVED_START_SESSION_KEYS as readonly string[]).includes(key)) {
+      continue;
+    }
+    normalized[key] = value;
+  }
+  return normalized;
+};
+
 export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   abortController: options.abortController ?? new AbortController(),
-  allowedTools: options.allowedTools ?? [],
+  // Preserve "unset" vs "explicit empty whitelist" — see ResolvedOptions.allowedTools.
+  allowedTools: options.allowedTools,
   anteArgs: options.anteArgs ?? [...DEFAULT_ANTE_ARGS],
   cwd: options.cwd ?? process.cwd(),
-  disallowedTools: options.disallowedTools ?? [],
+  disallowedTools: options.disallowedTools,
   effort: options.effort ?? thinkingToEffort(normalizeThinking(options.thinking)),
   enableAutoMemory: options.enableAutoMemory,
   env: normalizeEnv(options.env),
   model: options.model ?? "",
+  noSkills: options.noSkills,
   pathToAnteExecutable: options.pathToAnteExecutable ?? "ante",
   permissionMode: options.permissionMode ?? "default",
   provider: options.provider ?? "",
   resume: options.resume,
+  sessionExtras: normalizeSessionExtras(options.sessionExtras),
+  shortPrompt: options.shortPrompt,
   stderr: options.stderr,
   systemPrompt: typeof options.systemPrompt === "string" ? options.systemPrompt : undefined,
   appendSystemPrompt:
@@ -102,6 +173,39 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   transport: options.transport ?? "stdio",
   wsAddress: options.wsAddress ?? "127.0.0.1:17361",
 });
+
+/**
+ * Build the daemon's `StartSession` payload from resolved options.
+ * First-class fields are always written (when set); `sessionExtras` is
+ * merged underneath so typed options win on any key collision that slipped
+ * past {@link normalizeSessionExtras}.
+ *
+ * Tool filters:
+ * - `allowedTools` unset → omit `include_tools` (daemon default toolset)
+ * - `allowedTools: []` → send `include_tools: []` (no tools)
+ * - `disallowedTools` empty/unset → omit `exclude_tools`
+ */
+export const buildStartSessionPayload = (options: ResolvedOptions): StartSessionPayload => {
+  const excludeTools =
+    options.disallowedTools && options.disallowedTools.length > 0
+      ? options.disallowedTools
+      : undefined;
+  return {
+    ...options.sessionExtras,
+    model: options.model,
+    provider: options.provider,
+    effort: options.effort,
+    permission_mode: permissionModeToAnte(options.permissionMode),
+    system_prompt: options.systemPrompt,
+    append_system_prompt: options.appendSystemPrompt,
+    include_tools: options.allowedTools,
+    exclude_tools: excludeTools,
+    cwd: options.cwd,
+    enable_auto_memory: options.enableAutoMemory,
+    short_prompt: options.shortPrompt,
+    no_skills: options.noSkills,
+  };
+};
 
 /**
  * Maps the SDK's six-value `PermissionMode` (inherited from Claude Code-style

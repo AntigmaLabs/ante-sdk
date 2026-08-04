@@ -5,24 +5,33 @@ export interface AnteEventEnvelope {
   parent?: string;
 }
 
-// Field names follow the daemon's `SessionOverrides` struct exactly
+// Field names follow the daemon's `SessionOverrides` struct
 // (crates/protocol-shape in ante-preview; docs.antigma.ai/reference/protocol-reference).
 // The daemon ignores unknown fields rather than rejecting them, so a wrong
 // name here fails silently — verify against a live daemon when changing.
+//
+// `StartSession` is intentionally an open object (`& Record<string, unknown>`):
+// first-class keys cover the known SessionOverrides surface, while
+// `Options.sessionExtras` can forward newly-added daemon fields before the SDK
+// grows a typed option for them.
+export type StartSessionPayload = {
+  model: string;
+  provider: string;
+  effort?: ReasoningEffort;
+  permission_mode?: AntePermissionMode;
+  system_prompt?: string;
+  append_system_prompt?: string;
+  include_tools?: string[];
+  exclude_tools?: string[];
+  cwd?: string;
+  enable_auto_memory?: boolean;
+  short_prompt?: boolean;
+  no_skills?: boolean;
+} & Record<string, unknown>;
+
 export type AnteOperation =
   | {
-      StartSession: {
-        model: string;
-        provider: string;
-        effort?: ReasoningEffort;
-        permission_mode?: AntePermissionMode;
-        system_prompt?: string;
-        append_system_prompt?: string;
-        include_tools?: string[];
-        exclude_tools?: string[];
-        cwd?: string;
-        enable_auto_memory?: boolean;
-      };
+      StartSession: StartSessionPayload;
     }
   | {
       ResumeSession: {

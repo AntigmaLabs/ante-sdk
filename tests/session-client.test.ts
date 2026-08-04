@@ -42,7 +42,7 @@ const startSessionPayload = (transport: FakeTransport): Record<string, unknown> 
   return envelope.op?.StartSession ?? {};
 };
 
-test("startSession omits empty tool filters", () => {
+test("startSession omits tool filters when the caller did not set them", () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
     { model: "model", provider: "provider" },
@@ -53,6 +53,23 @@ test("startSession omits empty tool filters", () => {
   const payload = startSessionPayload(transport);
 
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "include_tools"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "exclude_tools"), false);
+});
+
+test("startSession sends an explicit empty include_tools whitelist when allowedTools is []", () => {
+  // Callers that want "no tools" (headless one-shots, selection translate/explain)
+  // pass allowedTools: []. That must reach the wire as include_tools: [] — omitting
+  // the field would leave the daemon's full default toolset enabled.
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider", allowedTools: [] },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.deepEqual(payload.include_tools, []);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "exclude_tools"), false);
 });
 
@@ -200,6 +217,98 @@ test("startSession forwards effort when provided", () => {
   const payload = startSessionPayload(transport);
 
   assert.equal(payload.effort, "high");
+});
+
+test("startSession forwards shortPrompt, noSkills, and enableAutoMemory", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    {
+      model: "model",
+      provider: "provider",
+      shortPrompt: true,
+      noSkills: true,
+      enableAutoMemory: false,
+    },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(payload.short_prompt, true);
+  assert.equal(payload.no_skills, true);
+  assert.equal(payload.enable_auto_memory, false);
+});
+
+test("startSession omits unset shortPrompt/noSkills rather than sending false", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "short_prompt"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "no_skills"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "enable_auto_memory"), false);
+});
+
+test("sessionExtras are forwarded on StartSession under daemon snake_case keys", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    {
+      model: "model",
+      provider: "provider",
+      sessionExtras: {
+        // Hypothetical future SessionOverrides field.
+        some_new_daemon_flag: true,
+        nested: { a: 1 },
+      },
+    },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(payload.some_new_daemon_flag, true);
+  assert.deepEqual(payload.nested, { a: 1 });
+});
+
+test("first-class Options win over colliding sessionExtras keys", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    {
+      model: "model",
+      provider: "provider",
+      shortPrompt: true,
+      permissionMode: "bypassPermissions",
+      allowedTools: ["WebSearch"],
+      sessionExtras: {
+        // Reserved keys must not override the typed mapping.
+        short_prompt: false,
+        permission_mode: "strict",
+        include_tools: ["Bash"],
+        allowed_tools: ["Write"],
+        policy: "Deny",
+        // Non-reserved extras still pass through.
+        future_knob: "on",
+      },
+    },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+
+  assert.equal(payload.short_prompt, true);
+  assert.equal(payload.permission_mode, "yolo");
+  assert.deepEqual(payload.include_tools, ["WebSearch"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "allowed_tools"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "policy"), false);
+  assert.equal(payload.future_knob, "on");
 });
 
 test("updateSession sends model id and mapped permission_mode", () => {

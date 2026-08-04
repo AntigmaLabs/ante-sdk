@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Add first-class `Options.shortPrompt` → `short_prompt` and `Options.noSkills` → `no_skills` on `StartSession`. Unset values are omitted so the daemon keeps its defaults.
+- Add `Options.sessionExtras` as a forward-compatible escape hatch for new `SessionOverrides` wire fields the SDK has not typed yet. Keys must already be the daemon's snake_case names. First-class options always win on collisions; reserved keys (`permission_mode`, `include_tools`, legacy `policy`/`allowed_tools`/…, and the new short-prompt/skills fields) are stripped from the extras bag so callers cannot bypass SDK mappings.
+- Export `buildStartSessionPayload`, `StartSessionPayload`, `SessionExtras`, and `RESERVED_START_SESSION_KEYS` for hosts that need to inspect or extend the payload.
+- **Tool filter semantics:** `allowedTools` unset still omits `include_tools` (daemon default toolset). Explicit `allowedTools: []` now sends `include_tools: []` so headless/no-tool callers get a real empty whitelist instead of silently inheriting every builtin tool. This matters more after 0.2.0 mapped `dontAsk` → `strict` (no more wire-level Deny).
+
 ## 0.2.1
 
 Completes the protocol alignment started in 0.2.0. All fixes verified against a live `ante serve --stdio` (0.preview.56) and the `SessionOverrides` struct in ante-preview's `protocol-shape` crate — the daemon ignores unknown fields, so every one of these was failing silently rather than erroring.

@@ -177,6 +177,18 @@ export type CanUseTool = (
   },
 ) => Promise<{ behavior: "allow" | "deny"; message?: string }>;
 
+/**
+ * Forward-compatible bag of extra `StartSession` / `SessionOverrides` wire
+ * fields. Keys must already be the daemon's snake_case names
+ * (e.g. `{ "short_prompt": true }`). Prefer the first-class camelCase
+ * `Options` fields when one exists; those always win on key collisions so
+ * callers cannot bypass SDK mappings for `permission_mode`, tool filters, etc.
+ *
+ * The daemon ignores unknown fields, so new protocol knobs can ship here
+ * before the SDK grows a typed option for them.
+ */
+export type SessionExtras = Record<string, unknown>;
+
 export interface Options {
   abortController?: AbortController;
   allowedTools?: string[];
@@ -186,13 +198,32 @@ export interface Options {
   cwd?: string;
   disallowedTools?: string[];
   effort?: ReasoningEffort;
+  /** Whether the agent records/recalls auto-memory (`enable_auto_memory`). */
   enableAutoMemory?: boolean;
   env?: Record<string, string | undefined>;
   model?: string;
+  /**
+   * Skip skill discovery for this session (`no_skills`). Skills are neither
+   * advertised in the system prompt nor invocable. Safe to set even on
+   * daemons that have not yet documented the field — unknown keys are ignored.
+   */
+  noSkills?: boolean;
   pathToAnteExecutable?: string;
   permissionMode?: PermissionMode;
   provider?: string;
   resume?: string;
+  /**
+   * Escape hatch for new `SessionOverrides` fields the SDK has not yet given
+   * a first-class option. See {@link SessionExtras}.
+   */
+  sessionExtras?: SessionExtras;
+  /**
+   * Use Ante's compact prompt set (`short_prompt`): condensed system prompt
+   * and smaller built-in tool descriptions. Cuts several thousand tokens of
+   * fixed tool-schema overhead per turn — useful for short-lived sessions
+   * (selection actions, one-shot headless calls).
+   */
+  shortPrompt?: boolean;
   stderr?: (data: string) => void;
   systemPrompt?: string | { type: "preset"; preset: "ante"; append?: string };
   appendSystemPrompt?: string;
