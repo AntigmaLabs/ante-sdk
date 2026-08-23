@@ -51,6 +51,9 @@ export type AnteOperation =
       UserInput: string;
     }
   | {
+      Steer: string;
+    }
+  | {
       ApprovalResponse: {
         turn_id: string;
         responses: Array<[string, ApprovalDecision]>;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+- Add `AnteClient.sendSteer()` and `Query.steer()` for Ante's native `Steer`
+  operation. Steering now adds live guidance to the active turn without
+  replacing the input operation used to correlate its streamed events and
+  `TurnEnd`.
+
 ## 0.2.2
 
 - Add first-class `Options.shortPrompt` → `short_prompt` and `Options.noSkills` → `no_skills` on `StartSession`. Unset values are omitted so the daemon keeps its defaults.

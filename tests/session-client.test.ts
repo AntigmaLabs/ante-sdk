@@ -155,6 +155,43 @@ test("emits turn start messages for the active input operation", async () => {
   ]);
 });
 
+test("sendSteer preserves the active turn operation and its TurnEnd", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: unknown[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  client.sendUserInput("make a video");
+  const inputId = (JSON.parse(transport.sent[0] ?? "{}") as { id?: string }).id;
+  client.sendSteer("use ffmpeg if needed");
+
+  const steerEnvelope = JSON.parse(transport.sent[1] ?? "{}") as {
+    op?: unknown;
+  };
+  assert.deepEqual(steerEnvelope.op, { Steer: "use ffmpeg if needed" });
+
+  transport.emit({ MessageDelta: { text: "done" } }, inputId);
+  transport.emit({ TurnEnd: { turn_id: "turn_test", status: "Completed" } }, inputId);
+
+  assert.deepEqual(messages, [
+    {
+      type: "stream_event",
+      event: { type: "text_delta", text: "done" },
+      session_id: undefined,
+    },
+    {
+      type: "result",
+      subtype: "success",
+      result: "done",
+      session_id: undefined,
+    },
+  ]);
+});
+
 test("ignores tool update protocol events", async () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(

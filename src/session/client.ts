@@ -36,6 +36,7 @@ export interface AnteClient {
   resumeSession(sessionId: string): Promise<string>;
   updateSession(update: SessionUpdate): void;
   sendUserInput(prompt: string): string;
+  sendSteer(prompt: string): string;
   respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision): void;
   interrupt(): void;
   shutdown(): void;
@@ -139,6 +140,10 @@ export class AnteProtocolClient implements AnteClient {
     const opId = this.sendOperation({ UserInput: prompt });
     this.activeInputOpId = opId;
     return opId;
+  }
+
+  sendSteer(prompt: string): string {
+    return this.sendOperation({ Steer: prompt });
   }
 
   respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision): void {

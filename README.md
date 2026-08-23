@@ -76,6 +76,12 @@ const sessionId = await client.startSession();
 client.sendUserInput(`Continue in session ${sessionId}.`);
 ```
 
+While that turn is active, send live guidance without starting a new turn:
+
+```ts
+client.sendSteer("also update the tests");
+```
+
 ## Transports
 
 By default, the SDK starts Ante with stdio:

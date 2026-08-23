@@ -241,6 +241,7 @@ export interface SessionUpdate {
 
 export interface Query extends AsyncGenerator<SDKMessage, void> {
   interrupt(): Promise<void>;
+  steer(prompt: string): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model?: string): Promise<void>;
   streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void>;

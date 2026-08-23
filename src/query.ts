@@ -86,6 +86,10 @@ class AnteQuery implements Query {
     this.client.interrupt();
   }
 
+  async steer(prompt: string): Promise<void> {
+    this.client.sendSteer(prompt);
+  }
+
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.permissionMode = mode;
     this.client.updateSession({ permissionMode: mode });

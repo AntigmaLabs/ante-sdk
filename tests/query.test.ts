@@ -14,6 +14,7 @@ import type {
 class FakeClient implements AnteClient {
   messages: SDKMessage[] = [];
   sentInputs: string[] = [];
+  sentSteers: string[] = [];
   startCalls = 0;
   resumeCalls: string[] = [];
   updateCalls: SessionUpdate[] = [];
@@ -47,6 +48,11 @@ class FakeClient implements AnteClient {
   sendUserInput(prompt: string): string {
     this.sentInputs.push(prompt);
     return `op_${this.sentInputs.length}`;
+  }
+
+  sendSteer(prompt: string): string {
+    this.sentSteers.push(prompt);
+    return `steer_${this.sentSteers.length}`;
   }
 
   respondToApproval(_approval: ApprovalRequest, _decision: ApprovalDecision): void {}
@@ -140,6 +146,25 @@ test("setPermissionMode and setModel forward to the client's updateSession", asy
     { permissionMode: "bypassPermissions" },
     { model: "gpt-5.4" },
   ]);
+});
+
+test("steer forwards live guidance without sending a new user input", async () => {
+  const client = new FakeClient();
+  const query = new __test__.AnteQuery(
+    "hello",
+    { model: "model", provider: "provider" },
+    (_options: Options) => client,
+  );
+
+  await Promise.resolve();
+  client.resolveSession("ses_1");
+  await query.next();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(client.sentInputs, ["hello"]);
+  await query.steer("also update the tests");
+
+  assert.deepEqual(client.sentSteers, ["also update the tests"]);
+  assert.deepEqual(client.sentInputs, ["hello"]);
 });
 
 test("query waits for resumed session before streaming input", async () => {
