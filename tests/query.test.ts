@@ -59,6 +59,8 @@ class FakeClient implements AnteClient {
 
   interrupt(): void {}
 
+  compact(_instructions?: string): void {}
+
   shutdown(): void {}
 
   close(): void {}

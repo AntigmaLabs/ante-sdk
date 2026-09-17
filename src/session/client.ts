@@ -37,7 +37,8 @@ export interface AnteClient {
   updateSession(update: SessionUpdate): void;
   sendUserInput(prompt: string): string;
   sendSteer(prompt: string): string;
-  respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision): void;
+  compact(instructions?: string): void;
+  respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision, message?: string): void;
   interrupt(): void;
   shutdown(): void;
   close(): void;
@@ -146,12 +147,16 @@ export class AnteProtocolClient implements AnteClient {
     return this.sendOperation({ Steer: prompt });
   }
 
-  respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision): void {
-    this.sendOperation(buildApprovalResponseOperation(approval, decision));
+  respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision, message?: string): void {
+    this.sendOperation(buildApprovalResponseOperation(approval, decision, message));
   }
 
   interrupt(): void {
     this.sendOperation("Interrupt");
+  }
+
+  compact(instructions?: string): void {
+    this.sendOperation({ Compact: { instructions } });
   }
 
   shutdown(): void {
@@ -228,6 +233,37 @@ export class AnteProtocolClient implements AnteClient {
           modelSpec: modelSpec ?? undefined,
           providerSpec: providerSpec ?? undefined,
           permissionMode: this.options.permissionMode,
+        });
+        return;
+      }
+      case "SessionUpdated": {
+        // Fired after `UpdateSession` (or another mid-session config change)
+        // confirms the daemon's new model/provider/permission state.
+        const modelSpec = extractSessionModelSpec(payload);
+        const providerSpec = extractSessionProviderSpec(payload);
+        this.emit({
+          type: "system",
+          subtype: "init",
+          session_id: this.sessionId ?? "",
+          cwd: this.options.cwd,
+          model: modelSpec?.name ?? this.options.model,
+          provider: providerSpec?.name ?? this.options.provider,
+          modelSpec: modelSpec ?? undefined,
+          providerSpec: providerSpec ?? undefined,
+          permissionMode: this.options.permissionMode,
+        });
+        return;
+      }
+      case "TurnResume": {
+        const turnId =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>).turn_id
+            : undefined;
+        this.emit({
+          type: "turn",
+          phase: "resume",
+          turnId: typeof turnId === "string" && turnId.trim() ? turnId.trim() : undefined,
+          session_id: this.sessionId ?? undefined,
         });
         return;
       }
@@ -421,9 +457,19 @@ export class AnteProtocolClient implements AnteClient {
         this.emitDone({ status: "completed" });
         return;
       }
-      case "SessionEnd":
-        this.close();
+      case "SessionEnd": {
+        // `SessionEnd { reason: "Replaced" }` fires for the *previous* session
+        // whenever `ResumeSession`/`StartSession` swaps in a new one — it is
+        // not terminal. Only `"Shutdown"` means the daemon is going away.
+        const reason =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>).reason
+            : undefined;
+        if (reason === "Shutdown") {
+          this.close();
+        }
         return;
+      }
       default:
         return;
     }
@@ -476,7 +522,13 @@ export class AnteProtocolClient implements AnteClient {
     // warm-up completes (see docs.antigma.ai/reference/protocol-reference),
     // often after the caller has already started the next turn — it must
     // not be dropped by the active-turn `parent` filter below.
-    return name === "SessionStart" || name === "Error" || name === "SessionEnd" || name === "ExtensionRefreshed";
+    return (
+      name === "SessionStart" ||
+      name === "SessionUpdated" ||
+      name === "Error" ||
+      name === "SessionEnd" ||
+      name === "ExtensionRefreshed"
+    );
   }
 }
 

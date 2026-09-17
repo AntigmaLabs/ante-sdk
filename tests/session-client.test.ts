@@ -3,6 +3,7 @@ import test from "node:test";
 import { AnteProtocolClient } from "../src/session/client.js";
 import type { ResolvedOptions } from "../src/session/options.js";
 import type { AnteTransport } from "../src/transport/transport.js";
+import type { SDKMessage } from "../src/types.js";
 
 class FakeTransport implements AnteTransport {
   sent: string[] = [];
@@ -190,6 +191,84 @@ test("sendSteer preserves the active turn operation and its TurnEnd", async () =
       session_id: undefined,
     },
   ]);
+});
+
+test("serializes Compact and ApprovalResponse using the current daemon shapes", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.compact("preserve decisions");
+  client.respondToApproval(
+    {
+      turnId: "turn_test",
+      message: "Review the command",
+      tools: [{ id: "tool_test", name: "shell", argsText: "{}" }],
+    },
+    "Deny",
+    "Unsafe command",
+  );
+
+  const compact = JSON.parse(transport.sent[0] ?? "{}") as { op?: unknown };
+  const approval = JSON.parse(transport.sent[1] ?? "{}") as { op?: unknown };
+  assert.deepEqual(compact.op, { Compact: { instructions: "preserve decisions" } });
+  assert.deepEqual(approval.op, {
+    ApprovalResponse: {
+      turn_id: "turn_test",
+      responses: [{ tool_use_id: "tool_test", decision: "Deny", message: "Unsafe command" }],
+    },
+  });
+});
+
+test("emits TurnResume for the active input operation", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: unknown[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  client.sendUserInput("hello");
+  const inputId = (JSON.parse(transport.sent[0] ?? "{}") as { id?: string }).id;
+  transport.emit({ TurnResume: { turn_id: "turn_test" } }, inputId);
+
+  assert.deepEqual(messages, [
+    { type: "turn", phase: "resume", turnId: "turn_test", session_id: undefined },
+  ]);
+});
+
+test("does not drop SessionUpdated from an update operation during an active turn", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: unknown[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  client.sendUserInput("hello");
+  transport.emit(
+    {
+      SessionUpdated: {
+        session_id: "ses_test",
+        model: { id: "updated-model" },
+        provider: { id: "updated-provider" },
+      },
+    },
+    "op_update",
+  );
+
+  assert.equal(messages.length, 1);
+  const message = messages[0] as Extract<SDKMessage, { type: "system" }>;
+  assert.equal(message.type, "system");
+  assert.equal(message.subtype, "init");
+  assert.equal(message.model, "updated-model");
+  assert.equal(message.provider, "updated-provider");
 });
 
 test("ignores tool update protocol events", async () => {

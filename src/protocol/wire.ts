@@ -54,9 +54,22 @@ export type AnteOperation =
       Steer: string;
     }
   | {
+      // Struct variant since ante v0.preview.90 — a bare `"Compact"` string
+      // is rejected by daemons at or after that release.
+      Compact: {
+        instructions?: string;
+      };
+    }
+  | {
+      // Matches the daemon's `ToolDecision` struct (protocol-shape/src/msg.rs):
+      // an object per tool call, not a `[id, decision]` tuple.
       ApprovalResponse: {
         turn_id: string;
-        responses: Array<[string, ApprovalDecision]>;
+        responses: Array<{
+          tool_use_id: string;
+          decision: ApprovalDecision;
+          message?: string;
+        }>;
       };
     }
   | "Interrupt"

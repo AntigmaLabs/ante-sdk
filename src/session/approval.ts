@@ -3,10 +3,20 @@ import type { ApprovalDecision, ApprovalRequest, ProcessLane, ProcessStep } from
 export const buildApprovalResponseOperation = (
   approval: ApprovalRequest,
   decision: ApprovalDecision,
-): { ApprovalResponse: { turn_id: string; responses: Array<[string, ApprovalDecision]> } } => ({
+  message?: string,
+): {
+  ApprovalResponse: {
+    turn_id: string;
+    responses: Array<{ tool_use_id: string; decision: ApprovalDecision; message?: string }>;
+  };
+} => ({
   ApprovalResponse: {
     turn_id: approval.turnId,
-    responses: approval.tools.map((tool) => [tool.id, decision] as [string, ApprovalDecision]),
+    responses: approval.tools.map((tool) => ({
+      tool_use_id: tool.id,
+      decision,
+      ...(message ? { message } : {}),
+    })),
   },
 });
 

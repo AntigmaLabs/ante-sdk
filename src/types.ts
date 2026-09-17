@@ -23,7 +23,10 @@ export type PermissionMode =
 /** Ante's native tool-approval policy (protocol `SessionConfig.permission_mode`). */
 export type AntePermissionMode = "strict" | "auto" | "yolo";
 
-export type ApprovalDecision = "Accept" | "AcceptForSession" | "AcceptAlways" | "Skip" | "Abort";
+// Matches the daemon's `ReviewDecision` (protocol-shape/src/msg.rs). `Abort`
+// was removed from the wire in ante v0.preview.85 ("deny and stop" now
+// composes as a deny plus an interrupt); `Skip` never existed on the wire.
+export type ApprovalDecision = "Accept" | "Deny" | "AcceptForSession" | "AcceptAlways";
 
 export interface ApprovalTool {
   id: string;
@@ -63,6 +66,11 @@ export interface ProviderSpec {
   name: string;
   displayName?: string;
   baseUrl?: string;
+  /**
+   * @deprecated The daemon stopped sending `preferred_models` on
+   * `ProviderSpec` in ante v0.preview.75; this always resolves to `[]`
+   * against a current daemon.
+   */
   preferredModels: ModelSpec[];
 }
 
@@ -141,7 +149,7 @@ export type SDKMessage =
       event: { type: "text_delta" | "thinking_delta"; text: string };
       session_id?: string;
     }
-  | { type: "turn"; phase: "start"; turnId?: string; session_id?: string }
+  | { type: "turn"; phase: "start" | "resume"; turnId?: string; session_id?: string }
   | { type: "tool"; phase: "start" | "end"; tool: ToolCall; session_id?: string }
   | { type: "approval"; approval: ApprovalRequest; session_id?: string }
   | { type: "usage"; usage: Usage; session_id?: string }

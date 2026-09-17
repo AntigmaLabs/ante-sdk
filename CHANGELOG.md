@@ -1,11 +1,18 @@
 # Changelog
 
-## 0.2.3
+## 0.3.0
 
-- Add `AnteClient.sendSteer()` and `Query.steer()` for Ante's native `Steer`
-  operation. Steering now adds live guidance to the active turn without
-  replacing the input operation used to correlate its streamed events and
-  `TurnEnd`.
+Re-verified against ante-preview's `protocol-shape` crate at `0.preview.91` (the SDK's last verification pass was `0.preview.56`, a 35-release gap). Highest-severity finding: `ApprovalResponse` was sending a wire shape the daemon cannot deserialize, so every approval response was silently failing.
+
+- **Fix `ApprovalResponse` wire encoding (breaking bug fix):** `responses` now sends `Array<{ tool_use_id, decision, message? }>`, matching the daemon's `ToolDecision` struct, instead of `Array<[id, decision]>` tuples the daemon's `Vec<ToolDecision>` deserializer rejects. `AnteClient.respondToApproval()` and `buildApprovalResponseOperation()` gain an optional `message` parameter (`ToolDecision.message`, denial feedback returned to the agent).
+- **Fix `ApprovalDecision` (breaking type change):** add `"Deny"` (the actual `ReviewDecision` variant used to reject a tool call — previously unrepresentable); drop `"Abort"` (removed from the wire in `v0.preview.85`; "deny and stop" now composes as a deny plus an interrupt) and `"Skip"` (never a real protocol value).
+- **Fix `SessionEnd` closing the client on every `ResumeSession` call:** the daemon emits `SessionEnd { reason: "Replaced" }` for the *previous* session whenever a new/resumed session takes over — this is not terminal. The client now only tears down the transport on `reason: "Shutdown"`.
+- **Fix `ToolCall.isError`:** it read a nonexistent `is_error` wire field (always `false`). Now derived from `status !== "Completed"`, matching the daemon's own `ToolEndStatus::is_error()` semantics (`Cancelled`/`Denied`/`Failed` are errors).
+- Add `AnteClient.sendSteer()` and `Query.steer()` for Ante's native `Steer` operation without replacing the active input operation used to correlate its streamed events and `TurnEnd`.
+- Add `Op::Compact` (`AnteClient.compact(instructions?)`) with the current struct-variant shape (`{ Compact: { instructions? } }`) — a bare `"Compact"` string has been rejected by the daemon since `v0.preview.90`.
+- Handle `Evt::SessionUpdated` (mid-session `UpdateSession` confirmation, previously silently dropped — local state could diverge from the daemon's) and `Evt::TurnResume` (new `SDKMessage` `{ type: "turn", phase: "resume" }`, closing the pause bracket opened by `TurnPause`/the `approval` message).
+- Mark `ProviderSpec.preferredModels` `@deprecated`: the daemon stopped sending `preferred_models` in `v0.preview.75`, so it always resolves to `[]` against a current daemon.
+- Add `scripts/check-protocol-drift.mjs` (`npm run check:protocol`) and the project-level `$ante-sdk-protocol-alignment` skill. The checker distinguishes documented, deliberately unsupported protocol variants from newly introduced drift, so known gaps are reported but do not permanently fail validation.
 
 ## 0.2.2
 

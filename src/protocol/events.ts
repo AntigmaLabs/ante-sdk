@@ -419,7 +419,10 @@ export const extractToolCall = (
     argsText,
     resultText,
     status,
-    isError: record.is_error === true,
+    // `ToolEnd.status` has no `is_error` wire field — the daemon's own
+    // `ToolEndStatus::is_error()` treats anything but `"Completed"` as an
+    // error (Cancelled/Denied/Failed). `ToolStart` has no status yet.
+    isError: eventName === "ToolEnd" && status != null && status !== "Completed",
   };
 };
 

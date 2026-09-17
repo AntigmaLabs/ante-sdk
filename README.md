@@ -60,7 +60,7 @@ const client = createAnteClient({
 
 client.setMessageHandler((message) => {
   if (message.type === "approval") {
-    client.respondToApproval(message.approval, { behavior: "allow" });
+    client.respondToApproval(message.approval, "Accept");
     return;
   }
 
