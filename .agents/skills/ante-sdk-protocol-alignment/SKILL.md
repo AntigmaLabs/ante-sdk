@@ -13,7 +13,7 @@ The Rust `crates/protocol-shape/src/msg.rs` definition is authoritative for wire
 
 Run `npm run check:protocol` to compare the checked-out SDK with the current upstream default branch. For a reproducible or offline comparison, run `node scripts/check-protocol-drift.mjs --local <ante-checkout>` or pass an explicit `--ref`.
 
-The report separates unexpected missing variants from `KNOWN_UNSUPPORTED` baseline entries. Do not add an item to that baseline merely to make a check pass: only do so when the public SDK intentionally does not expose the capability, its reason is documented, and the user accepts that scope.
+The report fails whenever the daemon has an Op or Evt variant the SDK does not cover. Do not weaken the comparison merely to make a check pass: implement the capability or obtain an explicit decision to leave it unsupported.
 
 ## Make an alignment change
 

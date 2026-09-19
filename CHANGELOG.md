@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Expose every current `Op` and `Evt` in Ante's `protocol-shape/msg.rs`: shell input/output, structured questions and replies, slash commands, local providers, context reports, goals, ambient hints, grouped info blocks, tool updates, session-end details, and all start/resume/update session fields.
+- `Query` exposes convenience operations during its single-turn lifetime; use `AnteClient` for multi-turn goals and other long-lived integrations. `SDKMessage` carries structured rather than flattened payloads for the newly supported event families.
+- Correct `allowedTools` to use the daemon's exact `tools` replacement field; `allowedTools: []` now truly disables all tools. Add `includeTools` for the additive `include_tools` field. Previous SDK versions incorrectly treated `include_tools` as a whitelist.
+- `npm run check:protocol` no longer has an allowlist: any upstream `Op` or `Evt` name missing from the SDK is a failure.
+
 ## 0.3.0
 
 Re-verified against ante-preview's `protocol-shape` crate at `0.preview.91` (the SDK's last verification pass was `0.preview.56`, a 35-release gap). Highest-severity finding: `ApprovalResponse` was sending a wire shape the daemon cannot deserialize, so every approval response was silently failing.
@@ -12,7 +19,7 @@ Re-verified against ante-preview's `protocol-shape` crate at `0.preview.91` (the
 - Add `Op::Compact` (`AnteClient.compact(instructions?)`) with the current struct-variant shape (`{ Compact: { instructions? } }`) — a bare `"Compact"` string has been rejected by the daemon since `v0.preview.90`.
 - Handle `Evt::SessionUpdated` (mid-session `UpdateSession` confirmation, previously silently dropped — local state could diverge from the daemon's) and `Evt::TurnResume` (new `SDKMessage` `{ type: "turn", phase: "resume" }`, closing the pause bracket opened by `TurnPause`/the `approval` message).
 - Mark `ProviderSpec.preferredModels` `@deprecated`: the daemon stopped sending `preferred_models` in `v0.preview.75`, so it always resolves to `[]` against a current daemon.
-- Add `scripts/check-protocol-drift.mjs` (`npm run check:protocol`) and the project-level `$ante-sdk-protocol-alignment` skill. The checker distinguishes documented, deliberately unsupported protocol variants from newly introduced drift, so known gaps are reported but do not permanently fail validation.
+- Add `scripts/check-protocol-drift.mjs` (`npm run check:protocol`) and the project-level `$ante-sdk-protocol-alignment` skill. The checker reports every daemon Op/Evt variant not covered by the SDK.
 
 ## 0.2.2
 

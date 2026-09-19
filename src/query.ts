@@ -1,5 +1,14 @@
 import { createAnteClient, type AnteClient } from "./session/client.js";
-import type { Options, PermissionMode, Query, SDKMessage, SDKUserMessage } from "./types.js";
+import type {
+  Options,
+  PermissionMode,
+  ProtocolModelSpec,
+  Query,
+  QuestionReply,
+  QuestionRequest,
+  SDKMessage,
+  SDKUserMessage,
+} from "./types.js";
 
 type QueueItem = IteratorResult<SDKMessage, void>;
 
@@ -90,6 +99,58 @@ class AnteQuery implements Query {
     this.client.sendSteer(prompt);
   }
 
+  async compact(instructions?: string): Promise<void> {
+    this.client.compact(instructions);
+  }
+
+  async shellInput(input: string): Promise<void> {
+    this.client.sendShellInput(input);
+  }
+
+  async respondToQuestion(question: QuestionRequest, reply: QuestionReply): Promise<void> {
+    this.client.respondToQuestion(question, reply);
+  }
+
+  async slashCommand(name: string, args = ""): Promise<void> {
+    this.client.sendSlashCommand(name, args);
+  }
+
+  async registerLocalProvider(port: number, model?: ProtocolModelSpec): Promise<void> {
+    this.client.registerLocalProvider(port, model);
+  }
+
+  async restoreLocalProvider(): Promise<void> {
+    this.client.restoreLocalProvider();
+  }
+
+  async requestContextReport(): Promise<void> {
+    this.client.requestContextReport();
+  }
+
+  async setGoal(condition: string): Promise<void> {
+    this.client.setGoal({ Set: condition });
+  }
+
+  async clearGoal(): Promise<void> {
+    this.client.setGoal("Clear");
+  }
+
+  async requestGoalStatus(): Promise<void> {
+    this.client.setGoal("Status");
+  }
+
+  async requestAmbientPhrase(draft: string, requestId: number): Promise<void> {
+    this.client.requestAmbientPhrase(draft, requestId);
+  }
+
+  async requestAmbientSuggestion(
+    recentUser: string,
+    recentAgent: string,
+    requestId: number,
+  ): Promise<void> {
+    this.client.requestAmbientSuggestion(recentUser, recentAgent, requestId);
+  }
+
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.permissionMode = mode;
     this.client.updateSession({ permissionMode: mode });
@@ -120,7 +181,7 @@ class AnteQuery implements Query {
     try {
       await this.client.connect();
       if (options.resume?.trim()) {
-        await this.client.resumeSession(options.resume.trim());
+        await this.client.resumeSession(options.resume.trim(), { unattended: options.unattended });
       } else {
         await this.client.startSession();
       }

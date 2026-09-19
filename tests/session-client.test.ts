@@ -57,9 +57,9 @@ test("startSession omits tool filters when the caller did not set them", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "exclude_tools"), false);
 });
 
-test("startSession sends an explicit empty include_tools whitelist when allowedTools is []", () => {
+test("startSession sends an explicit empty toolset when allowedTools is []", () => {
   // Callers that want "no tools" (headless one-shots, selection translate/explain)
-  // pass allowedTools: []. That must reach the wire as include_tools: [] — omitting
+  // pass allowedTools: []. That must reach the wire as tools: [] — omitting
   // the field would leave the daemon's full default toolset enabled.
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
@@ -70,15 +70,16 @@ test("startSession sends an explicit empty include_tools whitelist when allowedT
   client.startSession().catch(() => {});
   const payload = startSessionPayload(transport);
 
-  assert.deepEqual(payload.include_tools, []);
+  assert.deepEqual(payload.tools, []);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "exclude_tools"), false);
 });
 
-test("startSession sends tool filters under the daemon's include/exclude field names", () => {
+test("startSession sends exact, additive and excluded tool filters", () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
     {
       allowedTools: ["WebFetch"],
+      includeTools: ["Bash"],
       disallowedTools: ["Write"],
       model: "model",
       provider: "provider",
@@ -89,7 +90,8 @@ test("startSession sends tool filters under the daemon's include/exclude field n
   client.startSession().catch(() => {});
   const payload = startSessionPayload(transport);
 
-  assert.deepEqual(payload.include_tools, ["WebFetch"]);
+  assert.deepEqual(payload.tools, ["WebFetch"]);
+  assert.deepEqual(payload.include_tools, ["Bash"]);
   assert.deepEqual(payload.exclude_tools, ["Write"]);
   // The daemon never parsed these names; they must not be sent.
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "allowed_tools"), false);
@@ -271,7 +273,7 @@ test("does not drop SessionUpdated from an update operation during an active tur
   assert.equal(message.provider, "updated-provider");
 });
 
-test("ignores tool update protocol events", async () => {
+test("emits structured ToolUpdate protocol events", async () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
     { model: "model", provider: "provider" },
@@ -283,9 +285,130 @@ test("ignores tool update protocol events", async () => {
 
   client.sendUserInput("hello");
   const inputId = (JSON.parse(transport.sent[0] ?? "{}") as { id?: string }).id;
-  transport.emit({ ToolUpdate: { call_id: "tool_test", status: "running" } }, inputId);
+  transport.emit({ ToolUpdate: { tool_use_id: "tool_test", seq: 2, message: "running" } }, inputId);
 
-  assert.deepEqual(messages, []);
+  assert.deepEqual(messages, [
+    {
+      type: "tool_update",
+      toolUseId: "tool_test",
+      seq: 2,
+      message: "running",
+      session_id: undefined,
+    },
+  ]);
+});
+
+test("serializes every remaining daemon operation", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.sendShellInput("echo hi");
+  client.respondToQuestion(
+    { turnId: "turn_1", toolUseId: "tool_1", questions: [] },
+    { Answered: [{ selected: ["yes"], note: "continue" }] },
+  );
+  client.sendSlashCommand("clear", "--soft");
+  client.registerLocalProvider(4312, { id: "local-model", support_vision: true });
+  client.restoreLocalProvider();
+  client.requestContextReport();
+  client.setGoal({ Set: "finish tests" });
+  client.requestAmbientPhrase("draft", 7);
+  client.requestAmbientSuggestion("user", "agent", 8);
+
+  const operations = transport.sent.map((line) => (JSON.parse(line) as { op: unknown }).op);
+  assert.deepEqual(operations, [
+    { ShellInput: "echo hi" },
+    {
+      QuestionResponse: {
+        turn_id: "turn_1",
+        tool_use_id: "tool_1",
+        reply: { Answered: [{ selected: ["yes"], note: "continue" }] },
+      },
+    },
+    { SlashCommand: { name: "clear", args: "--soft" } },
+    { RegisterLocalProvider: { port: 4312, model: { id: "local-model", support_vision: true } } },
+    "RestoreLocalProvider",
+    "ContextReport",
+    { Goal: { Set: "finish tests" } },
+    { AmbientPhrase: { draft: "draft", req_id: 7 } },
+    { AmbientSuggestion: { recent_user: "user", recent_agent: "agent", req_id: 8 } },
+  ]);
+});
+
+test("rejects values outside the daemon's integer wire ranges", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+
+  assert.throws(() => client.registerLocalProvider(65_536), /port must be an integer/);
+  assert.throws(() => client.requestAmbientPhrase("draft", -1), /requestId must be an integer/);
+  assert.throws(
+    () => client.requestAmbientSuggestion("user", "agent", Number.MAX_SAFE_INTEGER + 1),
+    /requestId must be an integer/,
+  );
+  assert.deepEqual(transport.sent, []);
+});
+
+test("emits every newly covered structured protocol event", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "provider" },
+    (_options: ResolvedOptions) => transport,
+  );
+  const messages: SDKMessage[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  transport.emit({ UserInput: "replayed prompt" });
+  transport.emit({ ShellOutput: { command: "pwd", stdout: "/tmp", stderr: "", exit_code: 0 } });
+  transport.emit({ InfoBlockStart: { id: "info_1", header: "Loading", loading: true } });
+  transport.emit({ InfoBlockAppend: { id: "info_1", detail: "Done" } });
+  transport.emit({
+    TurnPause: {
+      turn_id: "turn_1",
+      reason: {
+        Question: {
+          tool_use_id: "tool_1",
+          questions: [{ header: "Choice", question: "Proceed?", multi_select: false, options: [] }],
+        },
+      },
+    },
+  });
+  transport.emit({
+    ContextReport: {
+      system_prompt_tokens: 1,
+      system_tools_tokens: 2,
+      mcp_tools_tokens: 3,
+      memory_tokens: 4,
+      skills_tokens: 5,
+      messages_tokens: 6,
+      used_tokens: 21,
+      limit_tokens: 100,
+      compact_buffer_tokens: 10,
+    },
+  });
+  transport.emit({ Ambient: { kind: "PromptSuggestion", req_id: 3, text: "Try this" } });
+  transport.emit({ SessionEnd: { session_id: "ses_1", reason: "Replaced", usage: { input_tokens: 2, output_tokens: 1 } } });
+
+  assert.equal(messages.length, 8);
+  assert.deepEqual(messages[0], { type: "user", message: "replayed prompt", session_id: undefined });
+  assert.deepEqual(messages[1], {
+    type: "shell_output",
+    output: { command: "pwd", stdout: "/tmp", stderr: "", exitCode: 0 },
+    session_id: undefined,
+  });
+  assert.equal(messages[4]?.type, "question");
+  assert.equal(messages[5]?.type, "context");
+  assert.deepEqual(messages[6], {
+    type: "ambient",
+    kind: "PromptSuggestion",
+    requestId: 3,
+    text: "Try this",
+    session_id: undefined,
+  });
+  assert.equal(messages[7]?.type, "session_end");
 });
 
 test("startSession sends Ante's native permission_mode instead of the deprecated policy field", () => {
@@ -356,6 +479,62 @@ test("startSession forwards shortPrompt, noSkills, and enableAutoMemory", () => 
   assert.equal(payload.enable_auto_memory, false);
 });
 
+test("startSession forwards every remaining session request setting", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    {
+      allowedTools: ["Read"],
+      includeSkills: ["commit"],
+      excludeSkills: ["deploy"],
+      saveSession: true,
+      unattended: true,
+      title: "Protocol review",
+    },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.startSession().catch(() => {});
+  const payload = startSessionPayload(transport);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "model"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "provider"), false);
+  assert.deepEqual(payload.tools, ["Read"]);
+  assert.deepEqual(payload.include_skills, ["commit"]);
+  assert.deepEqual(payload.exclude_skills, ["deploy"]);
+  assert.equal(payload.save_session, true);
+  assert.equal(payload.unattended, true);
+  assert.equal(payload.title, "Protocol review");
+});
+
+test("resume and update session serialize unattended and title", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+
+  client.resumeSession("ses_1", { unattended: true }).catch(() => {});
+  client.updateSession({ title: "Renamed" });
+
+  const operations = transport.sent.map((line) => (JSON.parse(line) as { op: unknown }).op);
+  assert.deepEqual(operations, [
+    { ResumeSession: { session_id: "ses_1", unattended: true } },
+    { UpdateSession: { title: "Renamed" } },
+  ]);
+});
+
+test("updateSession accepts the daemon's complete model specification", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+
+  client.updateSession({
+    model: { id: "local-model", context_limit: 128000, supported_efforts: ["low", "high"] },
+  });
+
+  const operation = JSON.parse(transport.sent[0] ?? "{}") as { op?: unknown };
+  assert.deepEqual(operation.op, {
+    UpdateSession: {
+      model: { id: "local-model", context_limit: 128000, supported_efforts: ["low", "high"] },
+    },
+  });
+});
+
 test("startSession omits unset shortPrompt/noSkills rather than sending false", () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
@@ -421,7 +600,8 @@ test("first-class Options win over colliding sessionExtras keys", () => {
 
   assert.equal(payload.short_prompt, true);
   assert.equal(payload.permission_mode, "yolo");
-  assert.deepEqual(payload.include_tools, ["WebSearch"]);
+  assert.deepEqual(payload.tools, ["WebSearch"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "include_tools"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "allowed_tools"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "policy"), false);
   assert.equal(payload.future_knob, "on");

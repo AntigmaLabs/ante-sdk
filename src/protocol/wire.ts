@@ -1,4 +1,11 @@
-import type { AntePermissionMode, ApprovalDecision, ReasoningEffort } from "../types.js";
+import type {
+  AntePermissionMode,
+  ApprovalDecision,
+  GoalCommand,
+  ProtocolModelSpec,
+  QuestionReply,
+  ReasoningEffort,
+} from "../types.js";
 
 export interface AnteEventEnvelope {
   event?: unknown;
@@ -15,8 +22,8 @@ export interface AnteEventEnvelope {
 // `Options.sessionExtras` can forward newly-added daemon fields before the SDK
 // grows a typed option for them.
 export type StartSessionPayload = {
-  model: string;
-  provider: string;
+  model?: string;
+  provider?: string;
   effort?: ReasoningEffort;
   permission_mode?: AntePermissionMode;
   system_prompt?: string;
@@ -27,6 +34,12 @@ export type StartSessionPayload = {
   enable_auto_memory?: boolean;
   short_prompt?: boolean;
   no_skills?: boolean;
+  tools?: string[];
+  include_skills?: string[];
+  exclude_skills?: string[];
+  save_session?: boolean;
+  unattended?: boolean;
+  title?: string;
 } & Record<string, unknown>;
 
 export type AnteOperation =
@@ -36,28 +49,67 @@ export type AnteOperation =
   | {
       ResumeSession: {
         session_id: string;
+        unattended?: boolean;
       };
     }
   | {
       UpdateSession: {
-        model?: {
-          id: string;
-          effort?: ReasoningEffort;
-        };
+        model?: ProtocolModelSpec;
         permission_mode?: AntePermissionMode;
+        title?: string;
       };
     }
   | {
       UserInput: string;
     }
   | {
+      ShellInput: string;
+    }
+  | {
       Steer: string;
     }
+  | {
+      QuestionResponse: {
+        turn_id: string;
+        tool_use_id: string;
+        reply: QuestionReply;
+      };
+    }
+  | {
+      SlashCommand: {
+        name: string;
+        args: string;
+      };
+    }
+  | {
+      RegisterLocalProvider: {
+        port: number;
+        model?: ProtocolModelSpec;
+      };
+    }
+  | "RestoreLocalProvider"
   | {
       // Struct variant since ante v0.preview.90 — a bare `"Compact"` string
       // is rejected by daemons at or after that release.
       Compact: {
         instructions?: string;
+      };
+    }
+  | "ContextReport"
+  | {
+      Goal: GoalCommand;
+    }
+  | {
+      AmbientPhrase: {
+        draft: string;
+        req_id: number;
+      };
+    }
+  | {
+      AmbientSuggestion: {
+        recent_user: string;
+        recent_agent: string;
+        req_id: number;
       };
     }
   | {

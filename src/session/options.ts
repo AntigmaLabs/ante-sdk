@@ -28,6 +28,12 @@ export const RESERVED_START_SESSION_KEYS = [
   "enable_auto_memory",
   "short_prompt",
   "no_skills",
+  "tools",
+  "include_skills",
+  "exclude_skills",
+  "save_session",
+  "unattended",
+  "title",
   // Legacy / wrong names the SDK used to send — keep them reserved so an
   // extras bag cannot reintroduce them under the old labels.
   "allowed_tools",
@@ -43,8 +49,8 @@ export interface ResolvedOptions {
   abortController: AbortController;
   /**
    * `undefined` = leave the daemon's default toolset alone (field omitted).
-   * `[]` = send `include_tools: []` (explicit empty whitelist — no tools).
-   * Non-empty = whitelist those tools.
+   * `[]` = send `tools: []` (explicit empty toolset).
+   * Non-empty = replace the default toolset with those tools.
    */
   allowedTools?: string[];
   anteArgs: string[];
@@ -60,6 +66,12 @@ export interface ResolvedOptions {
   env: Record<string, string>;
   model: string;
   noSkills?: boolean;
+  includeTools?: string[];
+  includeSkills?: string[];
+  excludeSkills?: string[];
+  saveSession?: boolean;
+  unattended?: boolean;
+  title?: string;
   pathToAnteExecutable: string;
   permissionMode: PermissionMode;
   provider: string;
@@ -156,6 +168,12 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
   env: normalizeEnv(options.env),
   model: options.model ?? "",
   noSkills: options.noSkills,
+  includeTools: options.includeTools,
+  includeSkills: options.includeSkills,
+  excludeSkills: options.excludeSkills,
+  saveSession: options.saveSession,
+  unattended: options.unattended,
+  title: options.title,
   pathToAnteExecutable: options.pathToAnteExecutable ?? "ante",
   permissionMode: options.permissionMode ?? "default",
   provider: options.provider ?? "",
@@ -181,8 +199,9 @@ export const resolveOptions = (options: Options = {}): ResolvedOptions => ({
  * past {@link normalizeSessionExtras}.
  *
  * Tool filters:
- * - `allowedTools` unset → omit `include_tools` (daemon default toolset)
- * - `allowedTools: []` → send `include_tools: []` (no tools)
+ * - `allowedTools` unset → omit `tools` (daemon default toolset)
+ * - `allowedTools: []` → send `tools: []` (no tools)
+ * - `includeTools` → send `include_tools` (add to daemon defaults)
  * - `disallowedTools` empty/unset → omit `exclude_tools`
  */
 export const buildStartSessionPayload = (options: ResolvedOptions): StartSessionPayload => {
@@ -192,18 +211,24 @@ export const buildStartSessionPayload = (options: ResolvedOptions): StartSession
       : undefined;
   return {
     ...options.sessionExtras,
-    model: options.model,
-    provider: options.provider,
+    model: options.model.trim() || undefined,
+    provider: options.provider.trim() || undefined,
     effort: options.effort,
     permission_mode: permissionModeToAnte(options.permissionMode),
     system_prompt: options.systemPrompt,
     append_system_prompt: options.appendSystemPrompt,
-    include_tools: options.allowedTools,
+    include_tools: options.includeTools,
     exclude_tools: excludeTools,
     cwd: options.cwd,
     enable_auto_memory: options.enableAutoMemory,
     short_prompt: options.shortPrompt,
     no_skills: options.noSkills,
+    tools: options.allowedTools,
+    include_skills: options.includeSkills,
+    exclude_skills: options.excludeSkills,
+    save_session: options.saveSession,
+    unattended: options.unattended,
+    title: options.title,
   };
 };
 

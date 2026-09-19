@@ -1,11 +1,15 @@
 import type {
   ApprovalRequest,
+  AmbientKind,
+  ContextBreakdown,
+  InfoBlock,
   McpServerInfo,
   McpToolInfo,
   ModelSpec,
   ProcessLane,
   ProcessStep,
   ProviderSpec,
+  QuestionRequest,
   SkillInfo,
   SubagentInfo,
   ToolCall,
@@ -271,6 +275,102 @@ export const extractTurnPauseApproval = (value: unknown): ApprovalRequest | null
     message,
     tools,
   };
+};
+
+export const extractTurnPauseQuestion = (value: unknown): QuestionRequest | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const turnId = typeof record.turn_id === "string" ? record.turn_id.trim() : "";
+  const question = record.reason && typeof record.reason === "object" && !Array.isArray(record.reason)
+    ? (record.reason as Record<string, unknown>).Question
+    : undefined;
+  if (!turnId || !question || typeof question !== "object" || Array.isArray(question)) {
+    return null;
+  }
+  const questionRecord = question as Record<string, unknown>;
+  const toolUseId = typeof questionRecord.tool_use_id === "string" ? questionRecord.tool_use_id.trim() : "";
+  if (!toolUseId || !Array.isArray(questionRecord.questions)) {
+    return null;
+  }
+  const questions = questionRecord.questions.reduce<QuestionRequest["questions"]>((all, entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return all;
+    const item = entry as Record<string, unknown>;
+    const header = typeof item.header === "string" ? item.header : "";
+    const text = typeof item.question === "string" ? item.question : "";
+    if (!header || !text || !Array.isArray(item.options)) return all;
+    const options = item.options.reduce<QuestionRequest["questions"][number]["options"]>((choices, choice) => {
+      if (!choice || typeof choice !== "object" || Array.isArray(choice)) return choices;
+      const option = choice as Record<string, unknown>;
+      if (typeof option.label !== "string" || typeof option.description !== "string") return choices;
+      choices.push({
+        label: option.label,
+        description: option.description,
+        preview: typeof option.preview === "string" ? option.preview : undefined,
+      });
+      return choices;
+    }, []);
+    all.push({ header, question: text, multiSelect: item.multi_select === true, options });
+    return all;
+  }, []);
+  return { turnId, toolUseId, questions };
+};
+
+export const extractShellOutput = (value: unknown): { command: string; stdout: string; stderr: string; exitCode?: number } | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.command !== "string" || typeof record.stdout !== "string" || typeof record.stderr !== "string") {
+    return null;
+  }
+  return {
+    command: record.command,
+    stdout: record.stdout,
+    stderr: record.stderr,
+    exitCode: typeof record.exit_code === "number" ? record.exit_code : undefined,
+  };
+};
+
+export const extractInfoBlock = (value: unknown, phase: "start" | "append"): InfoBlock | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : "";
+  if (!id) return null;
+  if (phase === "start") {
+    return typeof record.header === "string" ? { id, header: record.header, loading: record.loading === true } : null;
+  }
+  return typeof record.detail === "string" ? { id, detail: record.detail } : null;
+};
+
+export const extractContextBreakdown = (value: unknown): ContextBreakdown | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const required = [
+    "system_prompt_tokens", "system_tools_tokens", "mcp_tools_tokens", "memory_tokens", "skills_tokens",
+    "messages_tokens", "used_tokens", "compact_buffer_tokens",
+  ];
+  if (required.some((key) => typeof record[key] !== "number")) return null;
+  return {
+    systemPromptTokens: record.system_prompt_tokens as number,
+    systemToolsTokens: record.system_tools_tokens as number,
+    mcpToolsTokens: record.mcp_tools_tokens as number,
+    memoryTokens: record.memory_tokens as number,
+    skillsTokens: record.skills_tokens as number,
+    messagesTokens: record.messages_tokens as number,
+    usedTokens: record.used_tokens as number,
+    limitTokens: typeof record.limit_tokens === "number" ? record.limit_tokens : undefined,
+    compactBufferTokens: record.compact_buffer_tokens as number,
+  };
+};
+
+export const extractAmbient = (value: unknown): { kind: AmbientKind; requestId: number; text: string } | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  if ((kind !== "ThinkingPhrase" && kind !== "PromptSuggestion") || typeof record.req_id !== "number" || typeof record.text !== "string") {
+    return null;
+  }
+  return { kind, requestId: record.req_id, text: record.text };
 };
 
 export const extractTurnPauseDetail = (value: unknown): string => {

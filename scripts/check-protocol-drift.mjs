@@ -30,31 +30,6 @@ const sdkRoot = path.resolve(here, "..");
 const REPO = "AntigmaLabs/ante";
 const MSG_RS_PATH = "crates/protocol-shape/src/msg.rs";
 
-// These variants are intentionally not exposed by the public SDK yet. Keep
-// this baseline explicit: it documents the boundary while ensuring a newly
-// added daemon variant still fails CI instead of being silently masked.
-const KNOWN_UNSUPPORTED = {
-  op: new Set([
-    "ShellInput",
-    "SlashCommand",
-    "QuestionResponse",
-    "RegisterLocalProvider",
-    "RestoreLocalProvider",
-    "ContextReport",
-    "Goal",
-    "AmbientPhrase",
-    "AmbientSuggestion",
-  ]),
-  evt: new Set([
-    "UserInput",
-    "ShellOutput",
-    "InfoBlockStart",
-    "InfoBlockAppend",
-    "ContextReport",
-    "Ambient",
-  ]),
-};
-
 function parseArgs(argv) {
   const args = { ref: process.env.ANTE_PROTOCOL_REF ?? "main", json: false, local: null };
   for (let i = 0; i < argv.length; i += 1) {
@@ -202,13 +177,11 @@ function loadSdkHandledEvents() {
   return [...names];
 }
 
-function diff(daemonList, sdkList, knownUnsupported) {
+function diff(daemonList, sdkList) {
   const sdkSet = new Set(sdkList);
   const daemonSet = new Set(daemonList);
-  const missing = daemonList.filter((v) => !sdkSet.has(v));
   return {
-    missingInSdk: missing.filter((v) => !knownUnsupported.has(v)),
-    knownMissingInSdk: missing.filter((v) => knownUnsupported.has(v)),
+    missingInSdk: daemonList.filter((v) => !sdkSet.has(v)),
     staleInSdk: sdkList.filter((v) => !daemonSet.has(v)),
   };
 }
@@ -234,8 +207,8 @@ async function main() {
   const sdkOps = loadSdkOps();
   const sdkEvents = loadSdkHandledEvents();
 
-  const opDiff = diff(daemonOps, sdkOps, KNOWN_UNSUPPORTED.op);
-  const eventDiff = diff(daemonEvents, sdkEvents, KNOWN_UNSUPPORTED.evt);
+  const opDiff = diff(daemonOps, sdkOps);
+  const eventDiff = diff(daemonEvents, sdkEvents);
   const hasDrift = opDiff.missingInSdk.length > 0 || eventDiff.missingInSdk.length > 0;
 
   if (args.json) {
@@ -246,10 +219,6 @@ async function main() {
       if (d.missingInSdk.length) {
         console.log(`\n${title}: daemon variants the SDK cannot send/handle:`);
         for (const v of d.missingInSdk) console.log(`  - ${v}`);
-      }
-      if (d.knownMissingInSdk.length) {
-        console.log(`\n${title}: documented unsupported daemon variants:`);
-        for (const v of d.knownMissingInSdk) console.log(`  - ${v}`);
       }
       if (d.staleInSdk.length) {
         console.log(`\n${title}: SDK references variants no longer in the daemon (rename/removal?):`);

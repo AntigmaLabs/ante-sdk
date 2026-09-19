@@ -5,7 +5,11 @@ import type { AnteClient } from "../src/session/client.js";
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  GoalCommand,
   Options,
+  ProtocolModelSpec,
+  QuestionReply,
+  QuestionRequest,
   SDKMessage,
   SDKUserMessage,
   SessionUpdate,
@@ -34,7 +38,7 @@ class FakeClient implements AnteClient {
     });
   }
 
-  resumeSession(sessionId: string): Promise<string> {
+  resumeSession(sessionId: string, _options?: { unattended?: boolean }): Promise<string> {
     this.resumeCalls.push(sessionId);
     return new Promise((resolve) => {
       this.sessionResolve = resolve;
@@ -55,7 +59,41 @@ class FakeClient implements AnteClient {
     return `steer_${this.sentSteers.length}`;
   }
 
+  sendShellInput(_input: string): string {
+    return "shell_1";
+  }
+
   respondToApproval(_approval: ApprovalRequest, _decision: ApprovalDecision): void {}
+
+  respondToQuestion(_question: QuestionRequest, _reply: QuestionReply): void {}
+
+  sendSlashCommand(_name: string, _args?: string): string {
+    return "slash_1";
+  }
+
+  registerLocalProvider(_port: number, _model?: ProtocolModelSpec): string {
+    return "provider_1";
+  }
+
+  restoreLocalProvider(): string {
+    return "provider_2";
+  }
+
+  requestContextReport(): string {
+    return "context_1";
+  }
+
+  setGoal(_command: GoalCommand): string {
+    return "goal_1";
+  }
+
+  requestAmbientPhrase(_draft: string, _requestId: number): string {
+    return "ambient_1";
+  }
+
+  requestAmbientSuggestion(_recentUser: string, _recentAgent: string, _requestId: number): string {
+    return "ambient_2";
+  }
 
   interrupt(): void {}
 

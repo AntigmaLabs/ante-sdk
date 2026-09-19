@@ -40,6 +40,84 @@ export interface ApprovalRequest {
   tools: ApprovalTool[];
 }
 
+export interface QuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface QuestionSpec {
+  header: string;
+  question: string;
+  multiSelect: boolean;
+  options: QuestionOption[];
+}
+
+export interface QuestionRequest {
+  turnId: string;
+  toolUseId: string;
+  questions: QuestionSpec[];
+}
+
+export interface QuestionAnswer {
+  selected: string[];
+  note?: string;
+}
+
+/** Matches the daemon's `QuestionReply` enum. */
+export type QuestionReply =
+  | { Answered: QuestionAnswer[] }
+  | "Dismissed"
+  | { Discuss: { message?: string } };
+
+/** Matches the daemon's `GoalCommand` enum. */
+export type GoalCommand = { Set: string } | "Clear" | "Status";
+
+export type AmbientKind = "ThinkingPhrase" | "PromptSuggestion";
+
+/** Wire-shaped model description accepted by `RegisterLocalProvider`. */
+export interface ProtocolModelSpec {
+  id: string;
+  display_name?: string;
+  description?: string;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
+  stop_sequences?: string[];
+  context_limit?: number;
+  effort?: ReasoningEffort;
+  supported_efforts?: ReasoningEffort[];
+  support_vision?: boolean;
+  weight_class?: string;
+}
+
+export interface ContextBreakdown {
+  systemPromptTokens: number;
+  systemToolsTokens: number;
+  mcpToolsTokens: number;
+  memoryTokens: number;
+  skillsTokens: number;
+  messagesTokens: number;
+  usedTokens: number;
+  limitTokens?: number;
+  compactBufferTokens: number;
+}
+
+export interface ShellOutput {
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode?: number;
+}
+
+export interface InfoBlock {
+  id: string;
+  header?: string;
+  loading?: boolean;
+  detail?: string;
+}
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -152,8 +230,28 @@ export type SDKMessage =
   | { type: "turn"; phase: "start" | "resume"; turnId?: string; session_id?: string }
   | { type: "tool"; phase: "start" | "end"; tool: ToolCall; session_id?: string }
   | { type: "approval"; approval: ApprovalRequest; session_id?: string }
+  | { type: "question"; question: QuestionRequest; session_id?: string }
+  | { type: "user"; message: string; session_id?: string }
   | { type: "usage"; usage: Usage; session_id?: string }
-  | { type: "system"; subtype: "status"; status: "compacting" | null; session_id?: string }
+  | {
+      type: "system";
+      subtype: "status";
+      status: "compacting" | null;
+      summary?: string;
+      session_id?: string;
+    }
+  | { type: "shell_output"; output: ShellOutput; session_id?: string }
+  | { type: "tool_update"; toolUseId: string; seq: number; message: string; session_id?: string }
+  | { type: "info_block"; phase: "start" | "append"; block: InfoBlock; session_id?: string }
+  | { type: "context"; context: ContextBreakdown; session_id?: string }
+  | { type: "ambient"; kind: AmbientKind; requestId: number; text: string; session_id?: string }
+  | {
+      type: "session_end";
+      sessionId: string;
+      reason: "Replaced" | "Shutdown" | (string & {});
+      usage: Usage;
+      session_id?: string;
+    }
   | {
       type: "system";
       subtype: "diagnostic";
@@ -199,7 +297,10 @@ export type SessionExtras = Record<string, unknown>;
 
 export interface Options {
   abortController?: AbortController;
+  /** Exact toolset; an empty array disables all tools. */
   allowedTools?: string[];
+  /** Add tools to the daemon's default toolset. */
+  includeTools?: string[];
   anteArgs?: string[];
   canUseTool?: CanUseTool;
   continue?: boolean;
@@ -216,6 +317,16 @@ export interface Options {
    * daemons that have not yet documented the field — unknown keys are ignored.
    */
   noSkills?: boolean;
+  /** Additional skills to load for this session. */
+  includeSkills?: string[];
+  /** Skills to remove from the session. */
+  excludeSkills?: string[];
+  /** Persist a transcript and resumable snapshot. */
+  saveSession?: boolean;
+  /** Deny approval pauses because no user will answer them. */
+  unattended?: boolean;
+  /** Initial session title. */
+  title?: string;
   pathToAnteExecutable?: string;
   permissionMode?: PermissionMode;
   provider?: string;
@@ -242,14 +353,29 @@ export interface Options {
 }
 
 export interface SessionUpdate {
-  model?: string;
+  /** A model id for the common case, or the full daemon `ModelSpec`. */
+  model?: string | ProtocolModelSpec;
   effort?: ReasoningEffort;
   permissionMode?: PermissionMode;
+  /** Whitespace-only clears the title, matching the daemon contract. */
+  title?: string;
 }
 
 export interface Query extends AsyncGenerator<SDKMessage, void> {
   interrupt(): Promise<void>;
   steer(prompt: string): Promise<void>;
+  compact(instructions?: string): Promise<void>;
+  shellInput(input: string): Promise<void>;
+  respondToQuestion(question: QuestionRequest, reply: QuestionReply): Promise<void>;
+  slashCommand(name: string, args?: string): Promise<void>;
+  registerLocalProvider(port: number, model?: ProtocolModelSpec): Promise<void>;
+  restoreLocalProvider(): Promise<void>;
+  requestContextReport(): Promise<void>;
+  setGoal(condition: string): Promise<void>;
+  clearGoal(): Promise<void>;
+  requestGoalStatus(): Promise<void>;
+  requestAmbientPhrase(draft: string, requestId: number): Promise<void>;
+  requestAmbientSuggestion(recentUser: string, recentAgent: string, requestId: number): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model?: string): Promise<void>;
   streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void>;

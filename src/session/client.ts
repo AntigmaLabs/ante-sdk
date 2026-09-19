@@ -7,18 +7,33 @@ import {
 } from "./options.js";
 import { createTransport } from "../transport/factory.js";
 import type { AnteTransport } from "../transport/transport.js";
-import type { ApprovalDecision, ApprovalRequest, Options, SDKMessage, SessionUpdate } from "../types.js";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  GoalCommand,
+  Options,
+  ProtocolModelSpec,
+  QuestionReply,
+  QuestionRequest,
+  SDKMessage,
+  SessionUpdate,
+} from "../types.js";
 import {
   buildProcessLaneFromToolPayload,
+  extractAmbient,
+  extractContextBreakdown,
   extractErrorMessage,
   extractExtensionRefreshed,
+  extractInfoBlock,
   extractInfoMessage,
   extractSessionModelSpec,
   extractSessionProviderSpec,
+  extractShellOutput,
   extractSessionId,
   extractText,
   extractToolCall,
   extractTurnPauseApproval,
+  extractTurnPauseQuestion,
   extractTurnStatus,
   extractUsage,
   getVariant,
@@ -30,15 +45,30 @@ import {
   type AnteOperation,
 } from "../protocol/wire.js";
 
+const assertUnsignedInteger = (value: number, maximum: number, field: string): void => {
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+    throw new RangeError(`${field} must be an integer between 0 and ${maximum}`);
+  }
+};
+
 export interface AnteClient {
   connect(): Promise<void>;
   startSession(): Promise<string>;
-  resumeSession(sessionId: string): Promise<string>;
+  resumeSession(sessionId: string, options?: { unattended?: boolean }): Promise<string>;
   updateSession(update: SessionUpdate): void;
   sendUserInput(prompt: string): string;
+  sendShellInput(input: string): string;
   sendSteer(prompt: string): string;
   compact(instructions?: string): void;
   respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision, message?: string): void;
+  respondToQuestion(question: QuestionRequest, reply: QuestionReply): void;
+  sendSlashCommand(name: string, args?: string): string;
+  registerLocalProvider(port: number, model?: ProtocolModelSpec): string;
+  restoreLocalProvider(): string;
+  requestContextReport(): string;
+  setGoal(command: GoalCommand): string;
+  requestAmbientPhrase(draft: string, requestId: number): string;
+  requestAmbientSuggestion(recentUser: string, recentAgent: string, requestId: number): string;
   interrupt(): void;
   shutdown(): void;
   close(): void;
@@ -104,17 +134,14 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   startSession(): Promise<string> {
-    if (!this.options.model.trim() || !this.options.provider.trim()) {
-      throw new Error("Ante model and provider are required");
-    }
     this.sendOperation({
       StartSession: buildStartSessionPayload(this.options),
     });
     return this.createPendingSession();
   }
 
-  resumeSession(sessionId: string): Promise<string> {
-    this.sendOperation({ ResumeSession: { session_id: sessionId } });
+  resumeSession(sessionId: string, options?: { unattended?: boolean }): Promise<string> {
+    this.sendOperation({ ResumeSession: { session_id: sessionId, unattended: options?.unattended } });
     return this.createPendingSession(sessionId);
   }
 
@@ -123,15 +150,22 @@ export class AnteProtocolClient implements AnteClient {
       this.options.permissionMode = update.permissionMode;
     }
     if (update.model) {
-      this.options.model = update.model;
+      this.options.model = typeof update.model === "string" ? update.model : update.model.id;
     }
     if (update.effort) {
       this.options.effort = update.effort;
     }
     this.sendOperation({
       UpdateSession: {
-        model: update.model ? { id: update.model, effort: update.effort } : undefined,
+        model: update.model
+          ? {
+              ...(typeof update.model === "string" ? { id: update.model } : update.model),
+              effort:
+                update.effort ?? (typeof update.model === "string" ? undefined : update.model.effort),
+            }
+          : undefined,
         permission_mode: update.permissionMode ? permissionModeToAnte(update.permissionMode) : undefined,
+        title: update.title,
       },
     });
   }
@@ -143,12 +177,55 @@ export class AnteProtocolClient implements AnteClient {
     return opId;
   }
 
+  sendShellInput(input: string): string {
+    return this.sendOperation({ ShellInput: input });
+  }
+
   sendSteer(prompt: string): string {
     return this.sendOperation({ Steer: prompt });
   }
 
   respondToApproval(approval: ApprovalRequest, decision: ApprovalDecision, message?: string): void {
     this.sendOperation(buildApprovalResponseOperation(approval, decision, message));
+  }
+
+  respondToQuestion(question: QuestionRequest, reply: QuestionReply): void {
+    this.sendOperation({
+      QuestionResponse: { turn_id: question.turnId, tool_use_id: question.toolUseId, reply },
+    });
+  }
+
+  sendSlashCommand(name: string, args = ""): string {
+    return this.sendOperation({ SlashCommand: { name, args } });
+  }
+
+  registerLocalProvider(port: number, model?: ProtocolModelSpec): string {
+    assertUnsignedInteger(port, 65_535, "port");
+    return this.sendOperation({ RegisterLocalProvider: { port, model } });
+  }
+
+  restoreLocalProvider(): string {
+    return this.sendOperation("RestoreLocalProvider");
+  }
+
+  requestContextReport(): string {
+    return this.sendOperation("ContextReport");
+  }
+
+  setGoal(command: GoalCommand): string {
+    return this.sendOperation({ Goal: command });
+  }
+
+  requestAmbientPhrase(draft: string, requestId: number): string {
+    assertUnsignedInteger(requestId, Number.MAX_SAFE_INTEGER, "requestId");
+    return this.sendOperation({ AmbientPhrase: { draft, req_id: requestId } });
+  }
+
+  requestAmbientSuggestion(recentUser: string, recentAgent: string, requestId: number): string {
+    assertUnsignedInteger(requestId, Number.MAX_SAFE_INTEGER, "requestId");
+    return this.sendOperation({
+      AmbientSuggestion: { recent_user: recentUser, recent_agent: recentAgent, req_id: requestId },
+    });
   }
 
   interrupt(): void {
@@ -267,6 +344,16 @@ export class AnteProtocolClient implements AnteClient {
         });
         return;
       }
+      case "UserInput": {
+        const message = extractText(payload);
+        if (message) this.emit({ type: "user", message, session_id: this.sessionId ?? undefined });
+        return;
+      }
+      case "ShellOutput": {
+        const output = extractShellOutput(payload);
+        if (output) this.emit({ type: "shell_output", output, session_id: this.sessionId ?? undefined });
+        return;
+      }
       case "MessageDelta": {
         const text = extractText(payload);
         if (text) {
@@ -327,6 +414,22 @@ export class AnteProtocolClient implements AnteClient {
         return;
       }
       case "ToolUpdate": {
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const update = payload as Record<string, unknown>;
+          if (
+            typeof update.tool_use_id === "string" &&
+            typeof update.seq === "number" &&
+            typeof update.message === "string"
+          ) {
+            this.emit({
+              type: "tool_update",
+              toolUseId: update.tool_use_id,
+              seq: update.seq,
+              message: update.message,
+              session_id: this.sessionId ?? undefined,
+            });
+          }
+        }
         return;
       }
       case "ToolStart":
@@ -355,7 +458,10 @@ export class AnteProtocolClient implements AnteClient {
         const approval = extractTurnPauseApproval(payload);
         if (approval) {
           this.emit({ type: "approval", approval, session_id: this.sessionId ?? undefined });
+          return;
         }
+        const question = extractTurnPauseQuestion(payload);
+        if (question) this.emit({ type: "question", question, session_id: this.sessionId ?? undefined });
         return;
       }
       case "ExtensionRefreshed": {
@@ -384,14 +490,40 @@ export class AnteProtocolClient implements AnteClient {
           session_id: this.sessionId ?? undefined,
         });
         return;
-      case "CompactEnd":
-        this.emit({
-          type: "system",
-          subtype: "status",
-          status: null,
-          session_id: this.sessionId ?? undefined,
-        });
+      case "CompactEnd": {
+          const summary =
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? (payload as Record<string, unknown>).summary
+              : undefined;
+          this.emit({
+            type: "system",
+            subtype: "status",
+            status: null,
+            summary: typeof summary === "string" ? summary : undefined,
+            session_id: this.sessionId ?? undefined,
+          });
+          return;
+      }
+      case "InfoBlockStart": {
+        const block = extractInfoBlock(payload, "start");
+        if (block) this.emit({ type: "info_block", phase: "start", block, session_id: this.sessionId ?? undefined });
         return;
+      }
+      case "InfoBlockAppend": {
+        const block = extractInfoBlock(payload, "append");
+        if (block) this.emit({ type: "info_block", phase: "append", block, session_id: this.sessionId ?? undefined });
+        return;
+      }
+      case "ContextReport": {
+        const context = extractContextBreakdown(payload);
+        if (context) this.emit({ type: "context", context, session_id: this.sessionId ?? undefined });
+        return;
+      }
+      case "Ambient": {
+        const ambient = extractAmbient(payload);
+        if (ambient) this.emit({ type: "ambient", ...ambient, session_id: this.sessionId ?? undefined });
+        return;
+      }
       case "Info":
       case "Goodbye":
         this.emit({
@@ -465,6 +597,19 @@ export class AnteProtocolClient implements AnteClient {
           payload && typeof payload === "object" && !Array.isArray(payload)
             ? (payload as Record<string, unknown>).reason
             : undefined;
+        const sessionId =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>).session_id
+            : undefined;
+        if (typeof sessionId === "string" && typeof reason === "string") {
+          this.emit({
+            type: "session_end",
+            sessionId,
+            reason,
+            usage: extractUsage(payload),
+            session_id: this.sessionId ?? undefined,
+          });
+        }
         if (reason === "Shutdown") {
           this.close();
         }
@@ -527,7 +672,14 @@ export class AnteProtocolClient implements AnteClient {
       name === "SessionUpdated" ||
       name === "Error" ||
       name === "SessionEnd" ||
-      name === "ExtensionRefreshed"
+      name === "ExtensionRefreshed" ||
+      name === "UserInput" ||
+      name === "ShellOutput" ||
+      name === "ToolUpdate" ||
+      name === "InfoBlockStart" ||
+      name === "InfoBlockAppend" ||
+      name === "ContextReport" ||
+      name === "Ambient"
     );
   }
 }
