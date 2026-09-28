@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Add correlated native event delivery and replay suppression to `AnteProtocolClient` for host adapters, retaining transport injection.
 - Validate complete native questions and replies, and reject duplicate or expired replies.
