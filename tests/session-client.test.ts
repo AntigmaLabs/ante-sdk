@@ -298,13 +298,17 @@ test("emits structured ToolUpdate protocol events", async () => {
   ]);
 });
 
-test("serializes every remaining daemon operation", () => {
+test("serializes every remaining daemon operation", async () => {
   const transport = new FakeTransport();
   const client = new AnteProtocolClient(
     { model: "model", provider: "provider" },
     (_options: ResolvedOptions) => transport,
   );
 
+  await client.connect();
+  transport.emit({ TurnPause: { turn_id: "turn_1", reason: { Question: {
+    tool_use_id: "tool_1", questions: [{ header: "Next", question: "Continue?", options: [{ label: "yes", description: "" }] }],
+  } } } });
   client.sendShellInput("echo hi");
   client.respondToQuestion(
     { turnId: "turn_1", toolUseId: "tool_1", questions: [] },

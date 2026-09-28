@@ -8,8 +8,10 @@ import type {
 } from "../types.js";
 
 export interface AnteEventEnvelope {
-  event?: unknown;
-  parent?: string;
+  event: string | Record<string, unknown>;
+  parent?: string | null;
+  id?: string;
+  timestamp?: string;
 }
 
 // Field names follow the daemon's `SessionOverrides` struct
@@ -149,7 +151,19 @@ export const serializeOperation = (op: AnteOperation, id = generateOpId()): stri
 
 export const parseEnvelope = (raw: string): AnteEventEnvelope | null => {
   try {
-    return JSON.parse(raw) as AnteEventEnvelope;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const envelope = value as Record<string, unknown>;
+    const event = envelope.event;
+    if (typeof event !== "string" && (!event || typeof event !== "object" || Array.isArray(event))) return null;
+    if (envelope.parent != null && typeof envelope.parent !== "string") return null;
+    if (envelope.id !== undefined && typeof envelope.id !== "string") return null;
+    if (envelope.timestamp !== undefined && typeof envelope.timestamp !== "string") return null;
+    return { event: event as string | Record<string, unknown>,
+      ...(envelope.parent === null || typeof envelope.parent === "string" ? { parent: envelope.parent } : {}),
+      ...(typeof envelope.id === "string" ? { id: envelope.id } : {}),
+      ...(typeof envelope.timestamp === "string" ? { timestamp: envelope.timestamp } : {}),
+    };
   } catch {
     return null;
   }

@@ -207,3 +207,19 @@ Patch releases keep the public import path stable and may add new message varian
 ## License
 
 MIT
+
+## Desktop and host adapters
+
+`AnteProtocolClient` accepts a transport factory for host-controlled process
+execution. `setNativeEventHandler(handler, { suppressReplay: true })` delivers
+validated native envelopes with original event kinds and correlation fields;
+the suppression option excludes restored history until a new live operation
+produces events. The client owns start/resume and pending question state.
+Use `getPendingQuestion(turnId, toolUseId)` and `respondToQuestion` for structured
+questions; replies after resume, turn end, interruption, or close are rejected.
+`respondToToolApprovals` accepts independent decisions for each tool in a batch.
+
+Answers preserve the original question order and exact option labels. `note`
+can accompany a selection or carry a free-text answer. `Dismissed` skips a prompt;
+`{ Discuss: { message } }` requests discussion. Neither action means interrupting
+the task. Clients must continue reading events while a question is pending.

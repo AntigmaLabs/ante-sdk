@@ -1,3 +1,4 @@
+import { parseQuestionPause } from "../session/questions.js";
 import type {
   ApprovalRequest,
   AmbientKind,
@@ -277,45 +278,7 @@ export const extractTurnPauseApproval = (value: unknown): ApprovalRequest | null
   };
 };
 
-export const extractTurnPauseQuestion = (value: unknown): QuestionRequest | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  const turnId = typeof record.turn_id === "string" ? record.turn_id.trim() : "";
-  const question = record.reason && typeof record.reason === "object" && !Array.isArray(record.reason)
-    ? (record.reason as Record<string, unknown>).Question
-    : undefined;
-  if (!turnId || !question || typeof question !== "object" || Array.isArray(question)) {
-    return null;
-  }
-  const questionRecord = question as Record<string, unknown>;
-  const toolUseId = typeof questionRecord.tool_use_id === "string" ? questionRecord.tool_use_id.trim() : "";
-  if (!toolUseId || !Array.isArray(questionRecord.questions)) {
-    return null;
-  }
-  const questions = questionRecord.questions.reduce<QuestionRequest["questions"]>((all, entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return all;
-    const item = entry as Record<string, unknown>;
-    const header = typeof item.header === "string" ? item.header : "";
-    const text = typeof item.question === "string" ? item.question : "";
-    if (!header || !text || !Array.isArray(item.options)) return all;
-    const options = item.options.reduce<QuestionRequest["questions"][number]["options"]>((choices, choice) => {
-      if (!choice || typeof choice !== "object" || Array.isArray(choice)) return choices;
-      const option = choice as Record<string, unknown>;
-      if (typeof option.label !== "string" || typeof option.description !== "string") return choices;
-      choices.push({
-        label: option.label,
-        description: option.description,
-        preview: typeof option.preview === "string" ? option.preview : undefined,
-      });
-      return choices;
-    }, []);
-    all.push({ header, question: text, multiSelect: item.multi_select === true, options });
-    return all;
-  }, []);
-  return { turnId, toolUseId, questions };
-};
+export const extractTurnPauseQuestion = parseQuestionPause;
 
 export const extractShellOutput = (value: unknown): { command: string; stdout: string; stderr: string; exitCode?: number } | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

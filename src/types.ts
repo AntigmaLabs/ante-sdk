@@ -206,6 +206,7 @@ export type SDKUserMessage = {
 };
 
 export type SDKMessage =
+  | { type: "task_end"; toolUseId: string; exitCode: number | null; session_id?: string }
   | {
       type: "system";
       subtype: "init";

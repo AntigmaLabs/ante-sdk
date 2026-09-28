@@ -1,3 +1,4 @@
+import { validateQuestionReply } from "./questions.js";
 import { buildApprovalResponseOperation } from "./approval.js";
 import {
   buildStartSessionPayload,
@@ -43,6 +44,7 @@ import {
   parseEnvelope,
   serializeOperation,
   type AnteOperation,
+  type AnteEventEnvelope,
 } from "../protocol/wire.js";
 
 const assertUnsignedInteger = (value: number, maximum: number, field: string): void => {
@@ -88,6 +90,12 @@ export class AnteProtocolClient implements AnteClient {
     error?: string;
   }) => void = () => {};
   private sessionId: string | null = null;
+  private onNativeEvent: (event: AnteEventEnvelope) => void = () => {};
+  private suppressReplay = false;
+  private replaying = false;
+  private startupOperationId: string | null = null;
+  private readonly liveOperations = new Set<string>();
+  private readonly pendingQuestions = new Map<string, QuestionRequest>();
   private finalText = "";
   private activeInputOpId: string | null = null;
   private pendingSession: {
@@ -105,7 +113,15 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   async connect(): Promise<void> {
-    this.transport.setMessageHandler((line) => this.handleTransportMessage(line));
+    this.transport.setMessageHandler((line) => {
+      try { this.handleTransportMessage(line); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.pendingQuestions.clear();
+        this.rejectPendingSession(new Error(message));
+        this.emitDone({ status: "failed", error: message });
+      }
+    });
     this.transport.setDiagnosticHandler((event) => {
       this.options.stderr?.(event.text);
       this.emit({
@@ -117,10 +133,12 @@ export class AnteProtocolClient implements AnteClient {
       });
     });
     this.transport.setErrorHandler((error) => {
+      this.pendingQuestions.clear();
       this.rejectPendingSession(error);
       this.emitDone({ status: "failed", error: error.message });
     });
     this.transport.setCloseHandler((info) => {
+      this.pendingQuestions.clear();
       if (info?.reason === "SIGTERM") {
         this.rejectPendingSession(new Error("Ante server exited after SIGTERM"));
         this.emitDone({ status: "cancelled" });
@@ -133,16 +151,34 @@ export class AnteProtocolClient implements AnteClient {
     await this.transport.connect();
   }
 
+  setNativeEventHandler(handler: (event: AnteEventEnvelope) => void, options: { suppressReplay?: boolean } = {}): void {
+    this.onNativeEvent = handler;
+    this.suppressReplay = options.suppressReplay === true;
+  }
+
+  getPendingQuestion(turnId: string, toolUseId: string): QuestionRequest | null {
+    return this.pendingQuestions.get(`${turnId}:${toolUseId}`) ?? null;
+  }
+
   startSession(): Promise<string> {
-    this.sendOperation({
-      StartSession: buildStartSessionPayload(this.options),
-    });
-    return this.createPendingSession();
+    return this.beginSession({ StartSession: buildStartSessionPayload(this.options) });
   }
 
   resumeSession(sessionId: string, options?: { unattended?: boolean }): Promise<string> {
-    this.sendOperation({ ResumeSession: { session_id: sessionId, unattended: options?.unattended } });
-    return this.createPendingSession(sessionId);
+    return this.beginSession({ ResumeSession: { session_id: sessionId, unattended: options?.unattended } }, sessionId);
+  }
+
+  private beginSession(operation: AnteOperation, sessionId?: string): Promise<string> {
+    this.pendingQuestions.clear();
+    this.liveOperations.clear();
+    this.activeInputOpId = null;
+    this.finalText = "";
+    this.replaying = this.suppressReplay && sessionId !== undefined;
+    this.startupOperationId = generateOpId();
+    const result = this.createPendingSession(sessionId);
+    try { this.transport.send(serializeOperation(operation, this.startupOperationId)); }
+    catch (error) { this.rejectPendingSession(error instanceof Error ? error : new Error(String(error))); }
+    return result;
   }
 
   updateSession(update: SessionUpdate): void {
@@ -172,8 +208,10 @@ export class AnteProtocolClient implements AnteClient {
 
   sendUserInput(prompt: string): string {
     this.finalText = "";
-    const opId = this.sendOperation({ UserInput: prompt });
+    const opId = generateOpId();
     this.activeInputOpId = opId;
+    this.liveOperations.add(opId);
+    this.transport.send(serializeOperation({ UserInput: prompt }, opId));
     return opId;
   }
 
@@ -190,9 +228,23 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   respondToQuestion(question: QuestionRequest, reply: QuestionReply): void {
-    this.sendOperation({
+    const key = `${question.turnId}:${question.toolUseId}`;
+    const pending = this.pendingQuestions.get(key);
+    if (!pending) throw new Error("Ante question is no longer pending");
+    validateQuestionReply(pending, reply);
+    this.pendingQuestions.delete(key);
+    try { this.sendOperation({
       QuestionResponse: { turn_id: question.turnId, tool_use_id: question.toolUseId, reply },
-    });
+    }); } catch (error) { this.pendingQuestions.set(key, pending); throw error; }
+  }
+
+  respondToToolApprovals(turnId: string, decisions: Array<{ toolUseId: string; decision: ApprovalDecision; message?: string }>): void {
+    if (!turnId.trim() || decisions.length === 0 || new Set(decisions.map((item) => item.toolUseId)).size !== decisions.length) {
+      throw new Error("Invalid Ante approval decisions");
+    }
+    this.sendOperation({ ApprovalResponse: { turn_id: turnId, responses: decisions.map((item) => ({
+      tool_use_id: item.toolUseId, decision: item.decision, ...(item.message !== undefined ? { message: item.message } : {}),
+    })) } });
   }
 
   sendSlashCommand(name: string, args = ""): string {
@@ -229,6 +281,7 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   interrupt(): void {
+    this.pendingQuestions.clear();
     this.sendOperation("Interrupt");
   }
 
@@ -237,10 +290,12 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   shutdown(): void {
+    this.pendingQuestions.clear();
     this.sendOperation("Shutdown");
   }
 
   close(): void {
+    this.pendingQuestions.clear();
     this.rejectPendingSession(new Error("Ante client closed"));
     this.transport.disconnect();
   }
@@ -261,6 +316,7 @@ export class AnteProtocolClient implements AnteClient {
 
   private sendOperation(op: AnteOperation): string {
     const opId = generateOpId();
+    this.liveOperations.add(opId);
     this.transport.send(serializeOperation(op, opId));
     return opId;
   }
@@ -282,6 +338,18 @@ export class AnteProtocolClient implements AnteClient {
     if (!variant) {
       return;
     }
+    if (this.replaying) {
+      if (envelope.parent && this.liveOperations.has(envelope.parent)) this.replaying = false;
+      else if (envelope.parent !== this.startupOperationId) return;
+    }
+    if (variant.name === "TurnResume" || variant.name === "TurnEnd" || variant.name === "SessionEnd") {
+      this.pendingQuestions.clear();
+    }
+    if (variant.name === "TurnPause") {
+      const question = extractTurnPauseQuestion(variant.payload);
+      if (question) this.pendingQuestions.set(`${question.turnId}:${question.toolUseId}`, question);
+    }
+    this.onNativeEvent(envelope);
     if (
       !this.isLifecycleVariant(variant.name) &&
       this.activeInputOpId &&
@@ -411,6 +479,15 @@ export class AnteProtocolClient implements AnteClient {
           turnId: typeof turnId === "string" && turnId.trim() ? turnId.trim() : undefined,
           session_id: this.sessionId ?? undefined,
         });
+        return;
+      }
+      case "TaskEnd": {
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const task = payload as Record<string, unknown>;
+          if (typeof task.tool_use_id === "string" && (task.exit_code == null || Number.isInteger(task.exit_code))) {
+            this.emit({ type: "task_end", toolUseId: task.tool_use_id, exitCode: typeof task.exit_code === "number" ? task.exit_code : null, session_id: this.sessionId ?? undefined });
+          }
+        }
         return;
       }
       case "ToolUpdate": {

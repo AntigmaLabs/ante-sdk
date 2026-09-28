@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add correlated native event delivery and replay suppression to `AnteProtocolClient` for host adapters, retaining transport injection.
+- Validate complete native questions and replies, and reject duplicate or expired replies.
+- Add per-tool approval decisions and expose background `TaskEnd` notifications.
+- Question replies now require a live pending question.
+
+
 ## 0.4.0
 
 - Expose every current `Op` and `Evt` in Ante's `protocol-shape/msg.rs`: shell input/output, structured questions and replies, slash commands, local providers, context reports, goals, ambient hints, grouped info blocks, tool updates, session-end details, and all start/resume/update session fields.

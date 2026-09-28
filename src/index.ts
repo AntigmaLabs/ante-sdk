@@ -94,3 +94,5 @@ export type {
   ToolCall,
   Usage,
 } from "./types.js";
+
+export { parseQuestionPause, validateQuestionReply } from "./session/questions.js";
