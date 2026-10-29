@@ -145,6 +145,12 @@ export interface ProviderSpec {
   displayName?: string;
   baseUrl?: string;
   /**
+   * The session's explicit credential choice as a qualified reference such
+   * as `oauth:openai/work` — never a token. Absent means the daemon uses the
+   * provider's configured credential precedence. Since ante 0.3.0.
+   */
+  credential?: string;
+  /**
    * @deprecated The daemon stopped sending `preferred_models` on
    * `ProviderSpec` in ante v0.preview.75; this always resolves to `[]`
    * against a current daemon.
@@ -217,6 +223,8 @@ export type SDKMessage =
       permissionMode: PermissionMode;
       modelSpec?: ModelSpec;
       providerSpec?: ProviderSpec;
+      title?: string;
+      forkedFrom?: string;
     }
   | {
       type: "assistant";
@@ -265,6 +273,16 @@ export type SDKMessage =
       subtype: "success" | "error" | "cancelled";
       result?: string;
       error?: string;
+      /** `TurnEndStatus::Error.kind`, e.g. `"oauth"` when a sign-in is required. */
+      errorKind?: string;
+      session_id?: string;
+    }
+  | { type: "session_rewound"; to: string; session_id?: string }
+  | {
+      type: "session_forked";
+      forkedFrom: string;
+      forkedSessionId: string;
+      at?: string;
       session_id?: string;
     }
   | {
@@ -354,6 +372,18 @@ export interface Options {
 }
 
 export interface SessionUpdate {
+  /**
+   * Catalog provider id to continue the conversation on, applied on the next
+   * turn. The daemon refuses an unknown id or a switch while a turn runs.
+   */
+  provider?: string;
+  /**
+   * Pin a qualified credential reference (`oauth:openai/work`, `secret:openai`,
+   * `env:OPENAI_API_KEY`) on the resulting provider. The daemon refuses one
+   * outside the provider's credential pool, one that is unavailable, or a change
+   * while a turn runs. Since ante 0.3.0.
+   */
+  credential?: string;
   /** A model id for the common case, or the full daemon `ModelSpec`. */
   model?: string | ProtocolModelSpec;
   effort?: ReasoningEffort;

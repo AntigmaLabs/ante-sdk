@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+Aligned with ante 0.3.0's `protocol-shape` (`ante-protocol-shape` 0.3.0 on crates.io) and verified against a live `ante serve --stdio` 0.3.0.
+
+- `updateSession()` accepts `provider` (continue the conversation on another catalog provider, available since ante 0.2.5) and `credential` (pin a qualified credential reference such as `oauth:openai/work`, since ante 0.3.0).
+- `ProviderSpec.credential` reports the session's pinned credential on `system/init` messages, which also carry the session `title` and `forkedFrom`.
+- Add `rewindSession(to)` and `forkSession(at?)` with `session_rewound` and `session_forked` messages for the daemon's `RewindSession`/`ForkSession` operations.
+- `result/error` carries `errorKind` from `TurnEndStatus::Error.kind` (e.g. `"oauth"`). Export `extractTurnErrorKind`.
+
 ## 0.4.1
 
 - Add correlated native event delivery and replay suppression to `AnteProtocolClient` for host adapters, retaining transport injection.

@@ -36,6 +36,9 @@ import {
   extractTurnPauseApproval,
   extractTurnPauseQuestion,
   extractTurnStatus,
+  extractTurnErrorKind,
+  extractSessionTitle,
+  extractSessionForkedFrom,
   extractUsage,
   getVariant,
 } from "../protocol/events.js";
@@ -68,6 +71,8 @@ export interface AnteClient {
   registerLocalProvider(port: number, model?: ProtocolModelSpec): string;
   restoreLocalProvider(): string;
   requestContextReport(): string;
+  rewindSession(to: string): string;
+  forkSession(at?: string): string;
   setGoal(command: GoalCommand): string;
   requestAmbientPhrase(draft: string, requestId: number): string;
   requestAmbientSuggestion(recentUser: string, recentAgent: string, requestId: number): string;
@@ -182,6 +187,9 @@ export class AnteProtocolClient implements AnteClient {
   }
 
   updateSession(update: SessionUpdate): void {
+    if (update.provider) {
+      this.options.provider = update.provider;
+    }
     if (update.permissionMode) {
       this.options.permissionMode = update.permissionMode;
     }
@@ -193,6 +201,8 @@ export class AnteProtocolClient implements AnteClient {
     }
     this.sendOperation({
       UpdateSession: {
+        provider: update.provider,
+        credential: update.credential,
         model: update.model
           ? {
               ...(typeof update.model === "string" ? { id: update.model } : update.model),
@@ -262,6 +272,24 @@ export class AnteProtocolClient implements AnteClient {
 
   requestContextReport(): string {
     return this.sendOperation("ContextReport");
+  }
+
+  /**
+   * Rewind the active conversation to just before input `to` (a `TurnStart`
+   * turn id). Answered with a `session_rewound` message, or refused with an
+   * error while a turn runs or when `to` cannot be restored.
+   */
+  rewindSession(to: string): string {
+    return this.sendOperation({ RewindSession: { to } });
+  }
+
+  /**
+   * Save a copy of the idle conversation — at input `at`, or whole when
+   * omitted — as a new session. Answered with a `session_forked` message;
+   * the new session is not started (resume it to switch).
+   */
+  forkSession(at?: string): string {
+    return this.sendOperation({ ForkSession: at === undefined ? {} : { at } });
   }
 
   setGoal(command: GoalCommand): string {
@@ -378,6 +406,8 @@ export class AnteProtocolClient implements AnteClient {
           modelSpec: modelSpec ?? undefined,
           providerSpec: providerSpec ?? undefined,
           permissionMode: this.options.permissionMode,
+          title: extractSessionTitle(payload),
+          forkedFrom: extractSessionForkedFrom(payload),
         });
         return;
       }
@@ -396,6 +426,8 @@ export class AnteProtocolClient implements AnteClient {
           modelSpec: modelSpec ?? undefined,
           providerSpec: providerSpec ?? undefined,
           permissionMode: this.options.permissionMode,
+          title: extractSessionTitle(payload),
+          forkedFrom: extractSessionForkedFrom(payload),
         });
         return;
       }
@@ -591,6 +623,32 @@ export class AnteProtocolClient implements AnteClient {
         if (block) this.emit({ type: "info_block", phase: "append", block, session_id: this.sessionId ?? undefined });
         return;
       }
+      case "SessionRewound": {
+        const to =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>).to
+            : undefined;
+        if (typeof to === "string" && to) {
+          this.emit({ type: "session_rewound", to, session_id: this.sessionId ?? undefined });
+        }
+        return;
+      }
+      case "SessionForked": {
+        const record =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>)
+            : {};
+        if (typeof record.forked_from === "string" && typeof record.session_id === "string") {
+          this.emit({
+            type: "session_forked",
+            forkedFrom: record.forked_from,
+            forkedSessionId: record.session_id,
+            ...(typeof record.at === "string" ? { at: record.at } : {}),
+            session_id: this.sessionId ?? undefined,
+          });
+        }
+        return;
+      }
       case "ContextReport": {
         const context = extractContextBreakdown(payload);
         if (context) this.emit({ type: "context", context, session_id: this.sessionId ?? undefined });
@@ -644,10 +702,12 @@ export class AnteProtocolClient implements AnteClient {
         }
         if (failed) {
           const error = extractErrorMessage(payload);
+          const errorKind = extractTurnErrorKind(payload);
           this.emit({
             type: "result",
             subtype: "error",
             error,
+            ...(errorKind ? { errorKind } : {}),
             session_id: this.sessionId ?? undefined,
           });
           this.finalText = "";
@@ -756,6 +816,8 @@ export class AnteProtocolClient implements AnteClient {
       name === "InfoBlockStart" ||
       name === "InfoBlockAppend" ||
       name === "ContextReport" ||
+      name === "SessionRewound" ||
+      name === "SessionForked" ||
       name === "Ambient"
     );
   }

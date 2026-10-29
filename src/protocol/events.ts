@@ -674,6 +674,9 @@ export const extractProviderSpec = (value: unknown): ProviderSpec | null => {
         : typeof record.baseUrl === "string" && record.baseUrl.trim()
           ? record.baseUrl.trim()
           : undefined,
+    ...(typeof record.credential === "string" && record.credential.trim()
+      ? { credential: record.credential.trim() }
+      : {}),
     preferredModels: rawModels.flatMap((entry) => {
       const model = extractModelSpec(entry);
       return model ? [model] : [];
@@ -834,4 +837,26 @@ export const parseAssistantMessage = (
   }
 
   return [{ type: "result.text", text: message.trim() }];
+};
+
+export const extractTurnErrorKind = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const status = (value as Record<string, unknown>).status;
+  if (!status || typeof status !== "object" || Array.isArray(status)) return undefined;
+  const error = (status as Record<string, unknown>).Error;
+  if (!error || typeof error !== "object" || Array.isArray(error)) return undefined;
+  const kind = (error as Record<string, unknown>).kind;
+  return typeof kind === "string" && kind.trim() ? kind.trim() : undefined;
+};
+
+export const extractSessionTitle = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const title = (value as Record<string, unknown>).title;
+  return typeof title === "string" && title.trim() ? title : undefined;
+};
+
+export const extractSessionForkedFrom = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const forkedFrom = (value as Record<string, unknown>).forked_from;
+  return typeof forkedFrom === "string" && forkedFrom.trim() ? forkedFrom : undefined;
 };

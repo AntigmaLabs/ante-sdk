@@ -83,6 +83,14 @@ class FakeClient implements AnteClient {
     return "context_1";
   }
 
+  rewindSession(_to: string): string {
+    return "rewind_1";
+  }
+
+  forkSession(_at?: string): string {
+    return "fork_1";
+  }
+
   setGoal(_command: GoalCommand): string {
     return "goal_1";
   }

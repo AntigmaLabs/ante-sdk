@@ -45,6 +45,7 @@ export {
   extractToolCall,
   extractTurnPauseApproval,
   extractTurnPauseDetail,
+  extractTurnErrorKind,
   extractTurnStatus,
   extractUsage,
   getVariant,

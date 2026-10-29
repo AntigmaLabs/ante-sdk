@@ -116,11 +116,12 @@ The SDK emits typed `SDKMessage` objects. Common messages include:
 - `turn/start` when Ante starts a user turn.
 - `tool/start` and `tool/end` for tool execution.
 - `approval` when the host must approve or deny a tool call.
-- `result/success`, `result/error`, or `result/cancelled` when a turn completes.
+- `result/success`, `result/error`, or `result/cancelled` when a turn completes. `result/error` carries `errorKind` when the daemon classifies the failure (e.g. `"oauth"` when a sign-in is required).
 - `usage` for model usage metadata.
 - `question` for a structured `TurnPause/Question`, answered with `respondToQuestion()`.
 - `shell_output`, `tool_update`, `info_block`, `context`, and `ambient` for their corresponding daemon events.
 - `session_end` with the daemon's reason and final usage accounting.
+- `session_rewound` and `session_forked`, answering `rewindSession()` and `forkSession()`.
 - `system/diagnostic` for stderr/stdout diagnostics.
 - `extensions` for skills, sub-agents, and MCP servers (with their discovered tools) as the daemon refreshes them — fired once right after session start and again once MCP warm-up completes in the background.
 
@@ -146,9 +147,15 @@ await client.startSession();
 
 // Switch model/effort/permission mode without restarting the session.
 client.updateSession({ model: "gpt-5.4", effort: "medium", permissionMode: "acceptEdits" });
+
+// Continue on another provider, or pin one account of a provider (ante 0.3.0+).
+// `system/init` reports the pinned reference as `providerSpec.credential`.
+client.updateSession({ provider: "openai-subscription", credential: "oauth:openai/work" });
 ```
 
-For protocol-level host integrations, `AnteClient` exposes `sendShellInput`, `sendSlashCommand`, `registerLocalProvider`, `restoreLocalProvider`, `requestContextReport`, goal controls, ambient requests, and `compact`; `Query` provides corresponding convenience methods while its event iterator remains single-turn. `allowedTools` replaces the default toolset (including `[]` for no tools), whereas `includeTools` adds to defaults. Session options also include skill include/exclude lists, `saveSession`, `unattended`, and `title`.
+`StartSession` has no credential field, so pin an account with `updateSession({ credential })` after `startSession()` resolves and before the first input. The daemon refuses a credential outside the provider's pool or a change while a turn runs, reported as `result/error`.
+
+For protocol-level host integrations, `AnteClient` exposes `sendShellInput`, `sendSlashCommand`, `registerLocalProvider`, `restoreLocalProvider`, `requestContextReport`, `rewindSession`, `forkSession`, goal controls, ambient requests, and `compact`; `Query` provides corresponding convenience methods while its event iterator remains single-turn. `allowedTools` replaces the default toolset (including `[]` for no tools), whereas `includeTools` adds to defaults. Session options also include skill include/exclude lists, `saveSession`, `unattended`, and `title`.
 
 `Options.permissionMode` keeps its existing six-value vocabulary (`default` / `acceptEdits` / `bypassPermissions` / `plan` / `dontAsk` / `auto`) for backward compatibility with existing callers, but only three of those have a native Ante equivalent: `bypassPermissions` → `yolo`, `acceptEdits`/`auto` → `auto`, everything else → `strict` (always ask).
 

@@ -686,3 +686,118 @@ test("does not drop a late ExtensionRefreshed (MCP warm-up) during an active tur
   );
   assert.equal(extensionMessages.length, 1);
 });
+
+test("updateSession switches provider and pins a credential reference", () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient(
+    { model: "model", provider: "antix" },
+    (_options: ResolvedOptions) => transport,
+  );
+
+  client.updateSession({ provider: "openai-subscription", credential: "oauth:openai/work", model: "gpt-6.1-sol" });
+  const envelope = JSON.parse(transport.sent[0] ?? "{}") as {
+    op?: { UpdateSession?: Record<string, unknown> };
+  };
+
+  assert.deepEqual(envelope.op?.UpdateSession, {
+    provider: "openai-subscription",
+    credential: "oauth:openai/work",
+    model: { id: "gpt-6.1-sol" },
+  });
+});
+
+test("init messages carry the provider credential, title and fork source", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+  const messages: SDKMessage[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  transport.emit({
+    SessionStart: {
+      session_id: "ses_child",
+      model: { id: "gpt-6.1-sol" },
+      provider: {
+        id: "openai-subscription",
+        display_name: "OpenAI Subscription",
+        base_url: "https://chatgpt.com/backend-api/codex",
+        credential: "oauth:openai/work",
+      },
+      cwd: "/repo",
+      permission_mode: "strict",
+      title: "auth refactor",
+      forked_from: "ses_parent",
+    },
+  });
+  transport.emit({
+    SessionUpdated: {
+      session_id: "ses_child",
+      model: { id: "gpt-6.1-sol" },
+      provider: { id: "openai-subscription", display_name: "OpenAI Subscription", base_url: "https://x" },
+      cwd: "/repo",
+      permission_mode: "strict",
+    },
+  });
+
+  const inits = messages.filter(
+    (message): message is Extract<SDKMessage, { subtype: "init" }> =>
+      message.type === "system" && message.subtype === "init",
+  );
+  assert.equal(inits[0]?.providerSpec?.credential, "oauth:openai/work");
+  assert.equal(inits[0]?.title, "auth refactor");
+  assert.equal(inits[0]?.forkedFrom, "ses_parent");
+  assert.equal(inits[1]?.providerSpec?.credential, undefined);
+});
+
+test("rewind and fork serialize their operations and surface their acknowledgements", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+  const messages: SDKMessage[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  const rewindId = client.rewindSession("op_input_1");
+  client.forkSession();
+  const forkAtId = client.forkSession("op_input_2");
+  const operations = transport.sent.map((line) => (JSON.parse(line) as { op: unknown }).op);
+  assert.deepEqual(operations, [
+    { RewindSession: { to: "op_input_1" } },
+    { ForkSession: {} },
+    { ForkSession: { at: "op_input_2" } },
+  ]);
+
+  client.sendUserInput("busy");
+  transport.emit({ SessionRewound: { to: "op_input_1" } }, rewindId);
+  transport.emit({ SessionForked: { forked_from: "ses_a", session_id: "ses_b", at: "op_input_2" } }, forkAtId);
+
+  assert.deepEqual(
+    messages.filter((message) => message.type === "session_rewound" || message.type === "session_forked"),
+    [
+      { type: "session_rewound", to: "op_input_1", session_id: undefined },
+      { type: "session_forked", forkedFrom: "ses_a", forkedSessionId: "ses_b", at: "op_input_2", session_id: undefined },
+    ],
+  );
+});
+
+test("a failed turn reports its error kind", async () => {
+  const transport = new FakeTransport();
+  const client = new AnteProtocolClient({}, (_options: ResolvedOptions) => transport);
+  const messages: SDKMessage[] = [];
+  client.setMessageHandler((message) => messages.push(message));
+  await client.connect();
+
+  const opId = client.sendUserInput("hi");
+  transport.emit(
+    { TurnEnd: { turn_id: opId, status: { Error: { kind: "oauth", headline: "OAuth sign-in required", details: [] } } } },
+    opId,
+  );
+
+  const result = messages.find((message) => message.type === "result");
+  assert.deepEqual(result, {
+    type: "result",
+    subtype: "error",
+    error: "OAuth sign-in required",
+    errorKind: "oauth",
+    session_id: undefined,
+  });
+});

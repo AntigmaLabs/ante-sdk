@@ -56,6 +56,8 @@ export type AnteOperation =
     }
   | {
       UpdateSession: {
+        provider?: string;
+        credential?: string;
         model?: ProtocolModelSpec;
         permission_mode?: AntePermissionMode;
         title?: string;
@@ -98,6 +100,16 @@ export type AnteOperation =
       };
     }
   | "ContextReport"
+  | {
+      RewindSession: {
+        to: string;
+      };
+    }
+  | {
+      ForkSession: {
+        at?: string;
+      };
+    }
   | {
       Goal: GoalCommand;
     }
